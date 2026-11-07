@@ -1,0 +1,134 @@
+name: build
+
+# 推 main：x86 / arm 各打一个飞牛安装包（fpk），传到 Actions 产物，不发布。
+# 打 tag（v*，要与 fnos/manifest 的 version 一致）：再发 GitHub Release，并推 CDN（dl.miaomiaowux.com/meowx/fnos + latest.json）。
+# 带 '-' 的 tag（如 v0.2.0-pre1）只发 GitHub 预发布、不推 CDN。手动触发在 main 上且勾了 publish 也推 CDN。
+#
+# 打包在自建 runner（[self-hosted, lax]）上跑。这是公开仓库：不接 pull_request——自建 runner 会执行 PR 里的任意代码。
+# 推 CDN 需要仓库 secrets：R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY（与 meowC、meowx-openwrt 同名）；
+# 可选 variables.R2_BUCKET（默认 mmwx-dl）。
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: '打完推到 CDN（dl.miaomiaowux.com，更新 latest.json）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: [self-hosted, lax]
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x86, arm]
+    env:
+      # 内核源码、tailscale 安装包放 runner 用户家目录，下次打包不用重新拉；geo 数据每次取最新
+      MEOWX_CACHE: ${{ github.workspace }}/../../meowx-fnos-cache
+      GEO_REFRESH: '1'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      core: ${{ steps.version.outputs.core }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+          cache: false
+
+      - name: version
+        id: version
+        run: |
+          version=$(sed -n 's/^version *= *//p' fnos/manifest)
+          core=$(sed -n 's/^CORE_REF="${CORE_REF:-\(.*\)}"$/\1/p' scripts/build-core.sh)
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 fnos/manifest 的 version ${version} 不一致"
+            exit 1
+          fi
+          [ -n "$version" ] && [ -n "$core" ] || { echo "::error::读不到版本号 / 内核提交"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "core=$core" >> "$GITHUB_OUTPUT"
+          echo "打包 ${version}，内核 meowx-core ${core}"
+
+      - name: test
+        if: matrix.platform == 'x86'
+        run: |
+          (cd agent && go vet ./... && GOOS=linux go vet ./... && go test ./...)
+          python3 -m unittest scripts/test_publish_cdn.py
+
+      - name: build
+        run: |
+          rm -rf dist
+          scripts/build-fpk.sh "${{ steps.version.outputs.version }}" "${{ matrix.platform }}"
+          (cd dist && sha256sum *.fpk)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fpk-${{ matrix.platform }}
+          path: dist/*.fpk
+          if-no-files-found: error
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: fpk-*
+          path: dist
+          merge-multiple: true
+
+      - name: checksums
+        run: cd dist && sha256sum *.fpk | tee SHA256SUMS
+
+      - uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            dist/*.fpk
+            dist/SHA256SUMS
+          prerelease: ${{ contains(github.ref_name, '-') }}
+
+  # 推 CDN：安装包传到 R2 的 meowx/fnos/，再把 fnos 条目登记进 meowx/latest.json（文档站下载页读它）
+  publish:
+    needs: build
+    if: >-
+      ${{ (github.ref_type == 'tag' && !contains(github.ref_name, '-'))
+          || (github.event_name == 'workflow_dispatch' && inputs.publish && github.ref == 'refs/heads/main') }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish-cdn
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: fpk-*
+          path: dist
+          merge-multiple: true
+
+      - name: publish
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          python3 scripts/publish_cdn.py --version "${{ needs.build.outputs.version }}" \
+            --core "${{ needs.build.outputs.core }}" dist/*.fpk

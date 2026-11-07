@@ -1,7 +1,7 @@
 #!/bin/bash
 # 打飞牛安装包：scripts/build-fpk.sh <版本> [x86|arm]
 #
-# 产物 dist/meowx_<版本>_<平台>.fpk = tar.gz：
+# 产物 dist/MeowX-<版本>-fnos-<平台>.fpk = tar.gz：
 #   app.tgz（应用目录：docker/{docker-compose.yaml,Dockerfile,rootfs/}）、manifest、cmd/、config/、ui/、图标、meowx.sc
 # 镜像由飞牛起容器时按 Dockerfile 就地构建（FROM scratch + rootfs 里的静态程序），不连镜像仓库。
 set -euo pipefail
@@ -36,8 +36,13 @@ fi
 sed "s/__VERSION__/$VERSION/g" "$ROOT/app/docker/docker-compose.yaml" > "$WORK/target/docker/docker-compose.yaml"
 cp "$ROOT/app/docker/Dockerfile" "$WORK/target/docker/"
 export COPYFILE_DISABLE=1   # macOS 的 tar 别夹带 ._ 文件与扩展属性
-TAR_FLAGS=(--uid 0 --gid 0)
-tar --no-xattrs -cf /dev/null /dev/null 2>/dev/null && TAR_FLAGS+=(--no-xattrs --no-mac-metadata)
+# 属主一律 root：GNU tar（CI 的 Linux）与 bsdtar（macOS）写法不同
+if tar --version 2>/dev/null | grep -q GNU; then
+    TAR_FLAGS=(--owner=0 --group=0 --numeric-owner --no-xattrs)
+else
+    TAR_FLAGS=(--uid 0 --gid 0)
+    tar --no-mac-metadata -cf /dev/null /dev/null 2>/dev/null && TAR_FLAGS+=(--no-xattrs --no-mac-metadata)
+fi
 tar -C "$WORK/target" "${TAR_FLAGS[@]}" -czf "$WORK/pkg/app.tgz" docker
 
 # 3. 安装包
@@ -50,6 +55,6 @@ sed -e "s/^version .*/version         = $VERSION/" \
     -e "s/^checksum .*/checksum        = $CHECKSUM/" \
     "$ROOT/fnos/manifest" > "$WORK/pkg/manifest"
 
-OUT="$DIST/meowx_${VERSION}_${PLATFORM}.fpk"
+OUT="$DIST/MeowX-${VERSION}-fnos-${PLATFORM}.fpk"
 (cd "$WORK/pkg" && tar "${TAR_FLAGS[@]}" -czf "$OUT" *)
 echo "$OUT ($(du -h "$OUT" | cut -f1))"
