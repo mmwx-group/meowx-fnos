@@ -14,6 +14,7 @@ import (
 
 	"github.com/mmwx-group/meowx-fnos/agent/internal/api"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/app"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
 )
 
 var version = "dev"
@@ -34,6 +35,8 @@ func main() {
 		log.Fatal(err)
 	}
 	a.Log.Add("agent", "MeowX "+version+" 启动")
+	a.RecoverTrial()
+	hijack.CleanupLAN() // 上次崩溃留下的旁路由规则
 
 	web, _ := fs.Sub(webFS, "web")
 	srv := &http.Server{

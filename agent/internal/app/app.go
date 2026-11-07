@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/mmwx-group/meowx-fnos/agent/internal/core"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/runcfg"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 )
@@ -29,6 +30,9 @@ type App struct {
 
 	applyMu   sync.Mutex
 	lastError string
+
+	trialMu    sync.Mutex
+	trialTimer *time.Timer
 }
 
 const apiListen = "127.0.0.1:9090"
@@ -92,12 +96,14 @@ func (a *App) LastError() string {
 }
 
 func (a *App) buildConfig(profile []byte) ([]byte, error) {
+	s := a.Settings.Get()
 	return runcfg.Build(profile, runcfg.Inputs{
-		Settings:      a.Settings.Get(),
+		Settings:      s,
 		Po0ReportURLs: a.po0ReportURLs(),
 		APIListen:     apiListen,
 		APISecret:     a.Core.Secret,
 		UIPath:        a.UIPath,
+		TUN:           hijack.TUN(s, hijack.Discover()),
 	})
 }
 
@@ -134,6 +140,7 @@ func (a *App) Apply(ctx context.Context) error {
 func (a *App) applyLocked(ctx context.Context) error {
 	s := a.Settings.Get()
 	if !s.Enabled {
+		hijack.CleanupLAN()
 		a.Core.Stop()
 		return nil
 	}
@@ -160,11 +167,23 @@ func (a *App) applyLocked(ctx context.Context) error {
 		return err
 	}
 	a.Log.Add("agent", "启动内核")
-	return a.Core.Start(ctx)
+	hijack.CleanupLAN()
+	if err := a.Core.Start(ctx); err != nil {
+		return err
+	}
+	// 旁路由：内核的 tproxy 端口起来以后再把局域网设备的流量交过去
+	if plan := hijack.LAN(s, hijack.Discover()); plan != nil {
+		if err := hijack.ApplyLAN(*plan); err != nil {
+			return fmt.Errorf("旁路由规则没下发成功：%w", err)
+		}
+		a.Log.Add("agent", fmt.Sprintf("旁路由已开：%v → tproxy %d", plan.Interfaces, plan.TProxyPort))
+	}
+	return nil
 }
 
-// Shutdown：容器停止时
+// Shutdown：容器停止时（先撤旁路由，再停内核：内核退出时撤掉自己的 TUN 与路由）
 func (a *App) Shutdown() {
+	hijack.CleanupLAN()
 	a.Core.Stop()
 }
 

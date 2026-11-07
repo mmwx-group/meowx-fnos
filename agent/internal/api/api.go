@@ -13,11 +13,13 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/mmwx-group/meowx-fnos/agent/internal/app"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 )
 
@@ -33,6 +35,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/settings", s.getSettings)
 	mux.HandleFunc("PUT /api/settings", s.putSettings)
 	mux.HandleFunc("POST /api/service", s.service)
+	mux.HandleFunc("GET /api/proxy", s.proxyStatus)
+	mux.HandleFunc("POST /api/proxy/keep", s.proxyKeep)
+	mux.HandleFunc("GET /api/host", s.host)
 	mux.HandleFunc("GET /api/runconfig", s.runConfig)
 	mux.HandleFunc("GET /api/logs", s.logs)
 	mux.HandleFunc("DELETE /api/logs", s.clearLogs)
@@ -131,6 +136,7 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &next) {
 		return
 	}
+	prev := s.App.Settings.Get()
 	saved, err := s.App.Settings.Update(func(cur *store.Settings) error {
 		*cur = next
 		return nil
@@ -144,8 +150,30 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, map[string]any{"settings": saved, "error": err.Error()})
 			return
 		}
+		// 打开或改了透明代理（内核在跑）：进试用期，到点没确认自动关
+		if saved.Enabled && saved.Proxy.Enabled && !reflect.DeepEqual(prev.Proxy, saved.Proxy) {
+			s.App.StartTrial(saved.Proxy.KeepMinutes)
+		} else if !saved.Proxy.Enabled {
+			s.App.Keep()
+		}
 	}
-	writeJSON(w, map[string]any{"settings": saved})
+	writeJSON(w, map[string]any{"settings": s.App.Settings.Get(), "trial": s.App.Trial()})
+}
+
+// GET /api/proxy：透明代理的试用状态
+func (s *Server) proxyStatus(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.App.Trial())
+}
+
+// POST /api/proxy/keep：确认保留透明代理
+func (s *Server) proxyKeep(w http.ResponseWriter, r *http.Request) {
+	s.App.Keep()
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// GET /api/host：宿主机的网卡（透明代理页选局域网入口用）
+func (s *Server) host(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, hijack.Discover())
 }
 
 // POST /api/service {"action":"start|stop|restart"}：start / stop 会改「开关」并存盘
