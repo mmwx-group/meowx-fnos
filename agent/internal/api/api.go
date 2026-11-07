@@ -1,0 +1,501 @@
+// Package api：网页界面用的 HTTP API（接口清单见 docs/api.md）。
+package api
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"io"
+	"io/fs"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/mmwx-group/meowx-fnos/agent/internal/app"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
+)
+
+type Server struct {
+	App *app.App
+	Web fs.FS // 网页界面静态文件
+}
+
+func (s *Server) Handler() http.Handler {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/status", s.status)
+	mux.HandleFunc("POST /api/login", s.login)
+	mux.HandleFunc("GET /api/settings", s.getSettings)
+	mux.HandleFunc("PUT /api/settings", s.putSettings)
+	mux.HandleFunc("POST /api/service", s.service)
+	mux.HandleFunc("GET /api/runconfig", s.runConfig)
+	mux.HandleFunc("GET /api/logs", s.logs)
+	mux.HandleFunc("DELETE /api/logs", s.clearLogs)
+
+	mux.HandleFunc("GET /api/profiles", s.listProfiles)
+	mux.HandleFunc("POST /api/profiles", s.addProfile)
+	mux.HandleFunc("POST /api/profiles/upload", s.uploadProfile)
+	mux.HandleFunc("PATCH /api/profiles/{id}", s.editProfile)
+	mux.HandleFunc("DELETE /api/profiles/{id}", s.deleteProfile)
+	mux.HandleFunc("POST /api/profiles/{id}/update", s.updateProfile)
+	mux.HandleFunc("POST /api/profiles/{id}/use", s.useProfile)
+	mux.HandleFunc("GET /api/profiles/{id}/content", s.profileContent)
+
+	mux.HandleFunc("GET /api/panel", s.panelStatus)
+	mux.HandleFunc("POST /api/panel/login", s.panelLogin)
+	mux.HandleFunc("POST /api/panel/logout", s.panelLogout)
+	mux.HandleFunc("GET /api/panel/subscriptions", s.panelSubscriptions)
+	mux.HandleFunc("POST /api/panel/import", s.panelImport)
+	mux.HandleFunc("POST /api/panel/po0", s.panelPo0)
+
+	mux.Handle("/api/core/", s.coreProxy())
+	mux.Handle("/", http.FileServerFS(s.Web))
+	return s.auth(mux)
+}
+
+// ---------- 网页密码 ----------
+
+const cookieName = "meowx_session"
+
+// 会话令牌 = HMAC(密码)：改密码后旧会话自然失效，不用存会话表
+func (s *Server) sessionToken(password string) string {
+	m := hmac.New(sha256.New, []byte(s.App.Core.Secret))
+	m.Write([]byte(password))
+	return hex.EncodeToString(m.Sum(nil))
+}
+
+func (s *Server) auth(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		pw := s.App.Settings.Get().Web.Password
+		if pw == "" || !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/login" || r.URL.Path == "/api/status" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if c, err := r.Cookie(cookieName); err == nil && hmac.Equal([]byte(c.Value), []byte(s.sessionToken(pw))) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		writeErr(w, http.StatusUnauthorized, errors.New("需要登录"))
+	})
+}
+
+func (s *Server) login(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Password string `json:"password"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	pw := s.App.Settings.Get().Web.Password
+	if pw == "" || !hmac.Equal([]byte(body.Password), []byte(pw)) {
+		time.Sleep(time.Second)
+		writeErr(w, http.StatusUnauthorized, errors.New("密码不对"))
+		return
+	}
+	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: s.sessionToken(pw), Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode, MaxAge: 30 * 86400})
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// ---------- 状态 / 设置 / 服务 ----------
+
+func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	st := s.App.Settings.Get()
+	needLogin := false
+	if st.Web.Password != "" {
+		c, err := r.Cookie(cookieName)
+		needLogin = err != nil || !hmac.Equal([]byte(c.Value), []byte(s.sessionToken(st.Web.Password)))
+	}
+	out := map[string]any{"version": s.App.Version, "need_login": needLogin}
+	if !needLogin {
+		out["enabled"] = st.Enabled
+		out["profile"] = st.Profile
+		out["core"] = s.App.Core.Status()
+		out["error"] = s.App.LastError()
+		out["mixed_port"] = st.Mixin.MixedPort
+	}
+	writeJSON(w, out)
+}
+
+func (s *Server) getSettings(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.App.Settings.Get())
+}
+
+// PUT /api/settings：整份替换；?apply=0 只存不套用
+func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
+	var next store.Settings
+	if !readJSON(w, r, &next) {
+		return
+	}
+	saved, err := s.App.Settings.Update(func(cur *store.Settings) error {
+		*cur = next
+		return nil
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if r.URL.Query().Get("apply") != "0" {
+		if err := s.App.Apply(r.Context()); err != nil {
+			writeJSON(w, map[string]any{"settings": saved, "error": err.Error()})
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"settings": saved})
+}
+
+// POST /api/service {"action":"start|stop|restart"}：start / stop 会改「开关」并存盘
+func (s *Server) service(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action string `json:"action"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	switch body.Action {
+	case "start", "stop":
+		if _, err := s.App.Settings.Update(func(cur *store.Settings) error {
+			cur.Enabled = body.Action == "start"
+			return nil
+		}); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	case "restart":
+	default:
+		writeErr(w, http.StatusBadRequest, errors.New("action 只能是 start / stop / restart"))
+		return
+	}
+	if err := s.App.Apply(r.Context()); err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// 当前在跑的运行配置（编辑器只读看）
+func (s *Server) runConfig(w http.ResponseWriter, r *http.Request) {
+	http.ServeFile(w, r, s.App.Core.Paths.ConfigPath())
+}
+
+// GET /api/logs?after=<序号>&source=core|agent
+func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
+	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
+	writeJSON(w, s.App.Log.Since(after, r.URL.Query().Get("source")))
+}
+
+func (s *Server) clearLogs(w http.ResponseWriter, r *http.Request) {
+	s.App.Log.Clear()
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// ---------- 订阅 ----------
+
+func (s *Server) listProfiles(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"profiles": s.App.Profiles.List(), "active": s.App.Settings.Get().Profile})
+}
+
+// POST /api/profiles {"url","name","use":true}
+func (s *Server) addProfile(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		URL  string `json:"url"`
+		Name string `json:"name"`
+		Use  bool   `json:"use"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	p, err := s.App.Profiles.AddSubscription(ctx, body.URL, body.Name, false)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	s.afterAdd(w, r, p, body.Use)
+}
+
+// 新加的订阅：要求「用它」或还没有在用的订阅时直接切过去（同客户端：导入即切过去）
+func (s *Server) afterAdd(w http.ResponseWriter, r *http.Request, p store.Profile, use bool) {
+	if use || s.App.Settings.Get().Profile == "" {
+		if err := s.switchTo(r.Context(), p.ID); err != nil {
+			writeJSON(w, map[string]any{"profile": p, "error": err.Error()})
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"profile": p})
+}
+
+// POST /api/profiles/upload?name=…，正文是配置文件
+func (s *Server) uploadProfile(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	p, err := s.App.Profiles.AddLocal(ctx, r.URL.Query().Get("name"), data)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	s.afterAdd(w, r, p, r.URL.Query().Get("use") == "1")
+}
+
+// PATCH /api/profiles/{id} {"name","url","info_url","user_agent"}（只改给了的字段）
+func (s *Server) editProfile(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name      *string `json:"name"`
+		URL       *string `json:"url"`
+		InfoURL   *string `json:"info_url"`
+		UserAgent *string `json:"user_agent"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	p, err := s.App.Profiles.Edit(r.PathValue("id"), func(p *store.Profile) {
+		if body.Name != nil {
+			p.Name = strings.TrimSpace(*body.Name)
+		}
+		if body.URL != nil && p.URL != "" {
+			p.URL = strings.TrimSpace(*body.URL)
+		}
+		if body.InfoURL != nil {
+			p.InfoURL = strings.TrimSpace(*body.InfoURL)
+		}
+		if body.UserAgent != nil {
+			p.UserAgent = strings.TrimSpace(*body.UserAgent)
+		}
+	})
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, map[string]any{"profile": p})
+}
+
+func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.App.Settings.Get().Profile == id {
+		writeErr(w, http.StatusConflict, errors.New("正在用的订阅不能删，先切到别的"))
+		return
+	}
+	if err := s.App.Profiles.Delete(id); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// 刷新：正是在用的且内核在跑时重载
+func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	id := r.PathValue("id")
+	p, err := s.App.Profiles.Update(ctx, id)
+	if err != nil {
+		writeJSON(w, map[string]any{"profile": p, "error": err.Error()})
+		return
+	}
+	st := s.App.Settings.Get()
+	if st.Enabled && st.Profile == id {
+		if err := s.App.Apply(ctx); err != nil {
+			writeJSON(w, map[string]any{"profile": p, "error": err.Error()})
+			return
+		}
+	}
+	writeJSON(w, map[string]any{"profile": p})
+}
+
+func (s *Server) useProfile(w http.ResponseWriter, r *http.Request) {
+	if err := s.switchTo(r.Context(), r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// 切换在用的订阅：没开的顺手开（同客户端「选了订阅就连上」）；新配置起不来就退回原来的选择
+func (s *Server) switchTo(ctx context.Context, id string) error {
+	if _, ok := s.App.Profiles.Get(id); !ok {
+		return errors.New("订阅不存在")
+	}
+	prev := s.App.Settings.Get()
+	if _, err := s.App.Settings.Update(func(cur *store.Settings) error {
+		cur.Profile = id
+		cur.Enabled = true
+		return nil
+	}); err != nil {
+		return err
+	}
+	if err := s.App.Apply(ctx); err != nil {
+		_, _ = s.App.Settings.Update(func(cur *store.Settings) error {
+			cur.Profile, cur.Enabled = prev.Profile, prev.Enabled
+			return nil
+		})
+		_ = s.App.Apply(ctx)
+		return err
+	}
+	return nil
+}
+
+func (s *Server) profileContent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
+	http.ServeFile(w, r, s.App.Profiles.Path(r.PathValue("id")))
+}
+
+// ---------- 主控账户 ----------
+
+func (s *Server) panelRun(w http.ResponseWriter, r *http.Request, args ...string) {
+	out, err := s.App.Core.Panel(r.Context(), args...)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(out)
+}
+
+func (s *Server) panelStatus(w http.ResponseWriter, r *http.Request) { s.panelRun(w, r, "status") }
+
+func (s *Server) panelSubscriptions(w http.ResponseWriter, r *http.Request) {
+	s.panelRun(w, r, "subscriptions")
+}
+
+// POST /api/panel/import {"url","name"}：导入账户下的一份订阅（记成主控的，退出登录时删），导入即切过去
+func (s *Server) panelImport(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		URL  string `json:"url"`
+		Name string `json:"name"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Minute)
+	defer cancel()
+	p, err := s.App.Profiles.AddSubscription(ctx, body.URL, body.Name, true)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	s.afterAdd(w, r, p, true)
+}
+
+// POST /api/panel/login {"link":"miaomiaowu://login?..."}
+func (s *Server) panelLogin(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Link string `json:"link"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	s.panelRun(w, r, "login", strings.TrimSpace(body.Link))
+}
+
+// 退出登录：删掉从这个主控导入的订阅（同客户端；在用的那份删掉后停内核）
+func (s *Server) panelLogout(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.App.Core.Panel(r.Context(), "logout"); err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	active := s.App.Settings.Get().Profile
+	removedActive := false
+	for _, p := range s.App.Profiles.List() {
+		if p.FromPanel {
+			removedActive = removedActive || p.ID == active
+			_ = s.App.Profiles.Delete(p.ID)
+		}
+	}
+	if removedActive {
+		_, _ = s.App.Settings.Update(func(cur *store.Settings) error {
+			cur.Profile, cur.Enabled = "", false
+			return nil
+		})
+		_ = s.App.Apply(r.Context())
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// POST /api/panel/po0 {"action":"status|enable|disable|fetch|add|remove","address","token","index"}
+func (s *Server) panelPo0(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action  string `json:"action"`
+		Address string `json:"address"`
+		Token   string `json:"token"`
+		Index   int    `json:"index"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	args := []string{"po0", body.Action}
+	switch body.Action {
+	case "status", "enable", "disable", "fetch":
+	case "add":
+		args = append(args, body.Address, body.Token)
+	case "remove":
+		args = append(args, strconv.Itoa(body.Index))
+	default:
+		writeErr(w, http.StatusBadRequest, errors.New("未知操作"))
+		return
+	}
+	before := s.App.Settings.Get()
+	out, err := s.App.Core.Panel(r.Context(), args...)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	// po0 列表变了：直连规则跟着变，内核在跑就重载
+	if body.Action != "status" && before.Enabled {
+		_ = s.App.Apply(r.Context())
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	_, _ = w.Write(out)
+}
+
+// ---------- 内核的 REST API（节点、连接、日志，WebSocket 也转） ----------
+
+func (s *Server) coreProxy() http.Handler {
+	target, _ := url.Parse("http://" + s.App.Core.API)
+	rp := httputil.NewSingleHostReverseProxy(target)
+	director := rp.Director
+	rp.Director = func(r *http.Request) {
+		director(r)
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api/core")
+		r.URL.RawPath = ""
+		r.Header.Set("Authorization", "Bearer "+s.App.Core.Secret)
+		r.Header.Del("Cookie")
+	}
+	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
+		writeErr(w, http.StatusBadGateway, errors.New("内核没在运行"))
+	}
+	return rp
+}
+
+// ---------- 小工具 ----------
+
+func readJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(v); err != nil {
+		writeErr(w, http.StatusBadRequest, errors.New("请求格式不对："+err.Error()))
+		return false
+	}
+	return true
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	enc := json.NewEncoder(w)
+	enc.SetEscapeHTML(false)
+	_ = enc.Encode(v)
+}
+
+func writeErr(w http.ResponseWriter, code int, err error) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+}

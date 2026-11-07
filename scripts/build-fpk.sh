@@ -21,9 +21,15 @@ trap 'rm -rf "$WORK"' EXIT
 ROOTFS="$WORK/target/docker/rootfs"
 mkdir -p "$DIST" "$ROOTFS/usr/bin" "$ROOTFS/data" "$ROOTFS/tmp" "$WORK/pkg"
 
-# 1. 镜像里的程序
+# 1. 镜像里的程序：控制服务、内核（CORE_BIN 可指向已编好的，省得每次重编）、官方 tailscale
 (cd "$ROOT/agent" && CGO_ENABLED=0 GOOS=linux GOARCH="$GOARCH" \
     go build -trimpath -ldflags "-s -w -X main.version=$VERSION" -o "$ROOTFS/usr/bin/meowx-agent" .)
+if [ -n "${CORE_BIN:-}" ]; then
+    cp "$CORE_BIN" "$ROOTFS/usr/bin/meowx-core"
+else
+    "$ROOT/scripts/build-core.sh" "$GOARCH" "$ROOTFS/usr/bin/meowx-core"
+fi
+"$ROOT/scripts/fetch-tailscale.sh" "$GOARCH" "$ROOTFS/usr/bin" >/dev/null
 
 # 2. 应用目录
 sed "s/__VERSION__/$VERSION/g" "$ROOT/app/docker/docker-compose.yaml" > "$WORK/target/docker/docker-compose.yaml"

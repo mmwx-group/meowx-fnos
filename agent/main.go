@@ -1,38 +1,25 @@
-// meowx-agent：飞牛 NAS 版的控制服务（网页界面 + 管理内核 / 透明代理 / 喵窝）。
-// 现在只是骨架：起网页、报告容器里拿到的能力（TUN、netfilter netlink、宿主网络），用来验证 fpk + Docker 这条路。
+// meowx-agent：飞牛 NAS 版的控制服务（网页界面 + 管理内核 / 透明代理 / 喵窝），容器里的 PID 1。
 package main
 
 import (
-	"encoding/json"
-	"fmt"
+	"context"
+	"embed"
+	"io/fs"
 	"log"
-	"net"
 	"net/http"
 	"os"
-	"runtime"
-	"strings"
-	"unsafe"
+	"os/signal"
+	"syscall"
+	"time"
 
-	"golang.org/x/sys/unix"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/api"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/app"
 )
 
 var version = "dev"
 
-func main() {
-	addr := ":" + envOr("MEOWX_UI_PORT", "7899")
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/probe", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		_ = json.NewEncoder(w).Encode(probe())
-	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		b, _ := json.MarshalIndent(probe(), "", "  ")
-		fmt.Fprintf(w, "<!doctype html><meta charset=utf-8><title>MeowX</title><h1>MeowX %s</h1><pre>%s</pre>", version, b)
-	})
-	log.Printf("meowx-agent %s listening on %s", version, addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
-}
+//go:embed web
+var webFS embed.FS
 
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
@@ -41,55 +28,37 @@ func envOr(key, def string) string {
 	return def
 }
 
-type probeResult struct {
-	Version    string            `json:"version"`
-	Arch       string            `json:"arch"`
-	UID        int               `json:"uid"`
-	Interfaces []string          `json:"interfaces"`
-	TUN        string            `json:"tun"`
-	Netfilter  string            `json:"netfilter"`
-	Env        map[string]string `json:"env"`
-}
-
-func probe() probeResult {
-	p := probeResult{Version: version, Arch: runtime.GOARCH, UID: os.Getuid(), Env: map[string]string{}}
-	if ifs, err := net.Interfaces(); err == nil {
-		for _, i := range ifs {
-			p.Interfaces = append(p.Interfaces, i.Name)
-		}
-	}
-	p.TUN = probeTUN()
-	p.Netfilter = probeNetfilter()
-	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "TRIM_") || strings.HasPrefix(kv, "MEOWX_") {
-			k, v, _ := strings.Cut(kv, "=")
-			p.Env[k] = v
-		}
-	}
-	return p
-}
-
-// 建一个不持久的 TUN 设备再关掉（关闭 fd 设备就没了）
-func probeTUN() string {
-	fd, err := unix.Open("/dev/net/tun", unix.O_RDWR|unix.O_CLOEXEC, 0)
+func main() {
+	a, err := app.New(version, envOr("MEOWX_DATA", "/data"), envOr("MEOWX_CORE", "/usr/bin/meowx-core"), envOr("MEOWX_DASHBOARD", ""))
 	if err != nil {
-		return "open /dev/net/tun: " + err.Error()
+		log.Fatal(err)
 	}
-	defer unix.Close(fd)
-	var req [unix.IFNAMSIZ + 64]byte
-	copy(req[:], "meowx-probe")
-	*(*uint16)(unsafe.Pointer(&req[unix.IFNAMSIZ])) = unix.IFF_TUN | unix.IFF_NO_PI
-	if _, _, e := unix.Syscall(unix.SYS_IOCTL, uintptr(fd), uintptr(unix.TUNSETIFF), uintptr(unsafe.Pointer(&req[0]))); e != 0 {
-		return "TUNSETIFF: " + e.Error()
-	}
-	return "ok"
-}
+	a.Log.Add("agent", "MeowX "+version+" 启动")
 
-func probeNetfilter() string {
-	fd, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW|unix.SOCK_CLOEXEC, unix.NETLINK_NETFILTER)
-	if err != nil {
-		return "socket: " + err.Error()
+	web, _ := fs.Sub(webFS, "web")
+	srv := &http.Server{
+		Addr:              ":" + envOr("MEOWX_UI_PORT", "7899"),
+		Handler:           (&api.Server{App: a, Web: web}).Handler(),
+		ReadHeaderTimeout: 10 * time.Second,
 	}
-	unix.Close(fd)
-	return "ok"
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
+	defer stop()
+	go a.Loop(ctx)
+	go func() {
+		if a.Settings.Get().Enabled {
+			_ = a.Apply(ctx)
+		}
+	}()
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
+	}()
+	<-ctx.Done()
+	// 容器停止 / 卸载：先停内核（它退出时撤掉自己加的路由），再关网页
+	a.Shutdown()
+	shut, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = srv.Shutdown(shut)
 }
