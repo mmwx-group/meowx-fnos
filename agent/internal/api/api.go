@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/mmwx-group/meowx-fnos/agent/internal/app"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/core"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 )
@@ -52,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/profiles/{id}/content", s.profileContent)
 
 	mux.HandleFunc("GET /api/panel", s.panelStatus)
+	mux.HandleFunc("GET /api/panel/profile", s.panelProfile)
 	mux.HandleFunc("POST /api/panel/login", s.panelLogin)
 	mux.HandleFunc("POST /api/panel/logout", s.panelLogout)
 	mux.HandleFunc("GET /api/panel/subscriptions", s.panelSubscriptions)
@@ -151,15 +153,16 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.URL.Query().Get("apply") != "0" {
-		if err := s.App.Apply(r.Context()); err != nil {
-			writeJSON(w, map[string]any{"settings": saved, "error": err.Error()})
-			return
-		}
-		// 打开或改了透明代理（内核在跑）：进试用期，到点没确认自动关
+		// 打开或改了透明代理：套用之前就进试用期——套用到一半失败（TUN 已经起来、旁路由规则没下发成功）时
+		// NAS 的网络可能已经被改了，到点没确认照样自动关
 		if saved.Enabled && saved.Proxy.Enabled && !reflect.DeepEqual(prev.Proxy, saved.Proxy) {
 			s.App.StartTrial(saved.Proxy.KeepMinutes)
 		} else if !saved.Proxy.Enabled {
 			s.App.Keep()
+		}
+		if err := s.App.Apply(r.Context()); err != nil {
+			writeJSON(w, map[string]any{"settings": s.App.Settings.Get(), "error": err.Error(), "trial": s.App.Trial()})
+			return
 		}
 	}
 	writeJSON(w, map[string]any{"settings": s.App.Settings.Get(), "trial": s.App.Trial()})
@@ -218,7 +221,11 @@ func (s *Server) runConfig(w http.ResponseWriter, r *http.Request) {
 // GET /api/logs?after=<序号>&source=core|agent
 func (s *Server) logs(w http.ResponseWriter, r *http.Request) {
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
-	writeJSON(w, s.App.Log.Since(after, r.URL.Query().Get("source")))
+	lines := s.App.Log.Since(after, r.URL.Query().Get("source"))
+	if lines == nil {
+		lines = []core.Line{}
+	}
+	writeJSON(w, lines)
 }
 
 func (s *Server) clearLogs(w http.ResponseWriter, r *http.Request) {
@@ -229,7 +236,11 @@ func (s *Server) clearLogs(w http.ResponseWriter, r *http.Request) {
 // ---------- 订阅 ----------
 
 func (s *Server) listProfiles(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"profiles": s.App.Profiles.List(), "active": s.App.Settings.Get().Profile})
+	list := s.App.Profiles.List()
+	if list == nil {
+		list = []store.Profile{}
+	}
+	writeJSON(w, map[string]any{"profiles": list, "active": s.App.Settings.Get().Profile})
 }
 
 // POST /api/profiles {"url","name","use":true}
@@ -427,7 +438,63 @@ func (s *Server) panelLogin(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &body) {
 		return
 	}
-	s.panelRun(w, r, "login", strings.TrimSpace(body.Link))
+	out, err := s.App.Core.Panel(r.Context(), "login", strings.TrimSpace(body.Link))
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	resp := map[string]any{}
+	_ = json.Unmarshal(out, &resp)
+	if p, err := s.autoImport(r.Context()); err != nil {
+		resp["import_error"] = err.Error()
+	} else if p != nil {
+		resp["imported"] = p
+	}
+	// 登录后顺手拉主控下发的 po0 列表、补报一次白名单（同 OpenWrt 版）
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		_, _ = s.App.Core.Panel(ctx, "po0", "fetch")
+		_, _ = s.App.Core.Panel(ctx, "report")
+	}()
+	writeJSON(w, resp)
+}
+
+// 登录那一刻自动导入（同客户端 autoImportCandidate）：当前没在用订阅、账户下恰好一份 → 导入并切过去；
+// 多份不替用户选、已经在用别的订阅时不替用户换
+func (s *Server) autoImport(ctx context.Context) (*store.Profile, error) {
+	if s.App.Settings.Get().Profile != "" {
+		return nil, nil
+	}
+	out, err := s.App.Core.Panel(ctx, "subscriptions")
+	if err != nil {
+		return nil, err
+	}
+	var subs struct {
+		Subscriptions []struct {
+			Name string `json:"name"`
+			URL  string `json:"url"`
+		} `json:"subscriptions"`
+	}
+	if json.Unmarshal(out, &subs) != nil || len(subs.Subscriptions) != 1 {
+		return nil, nil
+	}
+	sub := subs.Subscriptions[0]
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	p, err := s.App.Profiles.AddSubscription(ctx, sub.URL, sub.Name, true)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.switchTo(ctx, p.ID); err != nil {
+		return &p, err
+	}
+	return &p, nil
+}
+
+// GET /api/panel/profile：向主控重取账户信息（昵称、头像），只在用户点「刷新」时调
+func (s *Server) panelProfile(w http.ResponseWriter, r *http.Request) {
+	s.panelRun(w, r, "profile")
 }
 
 // 退出登录：删掉从这个主控导入的订阅（同客户端；在用的那份删掉后停内核）
@@ -562,8 +629,10 @@ func (s *Server) coreProxy() http.Handler {
 	director := rp.Director
 	rp.Director = func(r *http.Request) {
 		director(r)
+		// 保留编码后的路径：组名 / 节点名里带「/」（如 HK/JP）时，解码后的 Path 去掉前缀再转出去就变成两段路径，内核回 404
+		escaped := strings.TrimPrefix(r.URL.EscapedPath(), "/api/core")
 		r.URL.Path = strings.TrimPrefix(r.URL.Path, "/api/core")
-		r.URL.RawPath = ""
+		r.URL.RawPath = escaped
 		r.Header.Set("Authorization", "Bearer "+s.App.Core.Secret)
 		r.Header.Del("Cookie")
 	}

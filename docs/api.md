@@ -13,7 +13,7 @@
 | POST | `/api/login` | `{password}` → 设 Cookie |
 | POST | `/api/service` | `{action: "start"\|"stop"\|"restart"}`；start / stop 会改开关并存盘 |
 | GET | `/api/settings` | 整份设置（结构见 `agent/internal/store/settings.go`，JSON 键是 snake_case） |
-| PUT | `/api/settings` | 整份替换；默认存完立刻套用（`?apply=0` 只存）。回 `{settings, error?}` |
+| PUT | `/api/settings` | 整份替换；默认存完立刻套用（`?apply=0` 只存）。回 `{settings, trial, error?}`；打开或改了透明代理时**套用之前**就进试用期，套用失败也会到点自动关 |
 | GET | `/api/runconfig` | 当前在跑的运行配置（YAML 文本，只读看） |
 | GET | `/api/logs?after=<序号>&source=core\|agent` | 日志增量：`[{seq, time(ms), source, text}]`，界面每 2 秒拿一次 `after=上次最大 seq` |
 | DELETE | `/api/logs` | 清空 |
@@ -51,7 +51,8 @@ Profile：`{id, name, url?, info_url?, user_agent?, from_panel?, updated_at(秒)
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/panel` | 登录状态（`panel status`） |
-| POST | `/api/panel/login` | `{link}`：主控网页「登录客户端」给的 `miaomiaowu://login?…` 链接 |
+| POST | `/api/panel/login` | `{link}`：主控网页「登录客户端」给的 `miaomiaowu://login?…` 链接。回 `panel login` 的 JSON，另加 `imported`（登录时自动导入的订阅：当前没在用订阅、账户下恰好一份时才有）或 `import_error`；登录后在后台拉一次 po0 列表、补报一次白名单 |
+| GET | `/api/panel/profile` | 向主控重取昵称 / 头像（`panel profile`），只在用户点「刷新」时调 |
 | POST | `/api/panel/logout` | 退出；删掉从主控导入的订阅（在用的删掉后停内核） |
 | GET | `/api/panel/subscriptions` | 账户下的订阅（`panel subscriptions`） |
 | POST | `/api/panel/import` | `{url, name}` 导入账户下的一份并切过去 |
