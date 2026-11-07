@@ -1603,6 +1603,8 @@ code,
 
     .conn__traffic {
         order: 3;
+        display: flex;
+        gap: 14px;
         width: 100%;
         text-align: left;
         min-width: 0;
@@ -1859,4 +1861,26 @@ code,
 .peer-dot.is-online {
     background: var(--good);
     opacity: 1;
+}
+
+.kv > .btn {
+    justify-self: end;
+}
+
+.inline.wrap > .input.is-full {
+    flex-basis: 100%;
+}
+
+.card .status {
+    background: var(--elev2);
+}
+
+@media (max-width: 640px) {
+    .nodes {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .toolbar > .muted:first-child {
+        flex-basis: 100%;
+    }
 }

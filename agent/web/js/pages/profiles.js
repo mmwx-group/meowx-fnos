@@ -350,7 +350,7 @@ function Po0Card() {
         </div>`)}</div>`}
         ${!st.enabled && custom.length > 0 && html`<p class="hint">「po0 加白」关着，这些服务器暂时不上报。</p>`}
         <form class="inline wrap" onSubmit=${(e) => e.preventDefault()}>
-            <input class=${'input' + (bad.address ? ' is-invalid' : '')} placeholder="加白服务器地址：IP 或域名，可带端口" spellcheck="false" autocomplete="off"
+            <input class=${'input is-full' + (bad.address ? ' is-invalid' : '')} placeholder="加白服务器地址：IP 或域名，可带端口" spellcheck="false" autocomplete="off"
                 value=${address} onInput=${(e) => setAddress(e.currentTarget.value)} />
             <input class=${'input' + (bad.token ? ' is-invalid' : '')} type="password" placeholder="token，pgnfw_ 开头（可带 @槽位）" autocomplete="new-password"
                 value=${token} onInput=${(e) => setToken(e.currentTarget.value)} />
