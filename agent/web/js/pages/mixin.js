@@ -73,13 +73,13 @@ export function Mixin({ active }) {
             ${v('geo_auto_update') && html`<${Field} label="GeoX 文件更新间隔" desc="小时" wide><${NumberInput} ...${b('geo_update_interval')} placeholder="不修改" /><//>`}
         <//>
 
-        <${Card} title="入站" desc="端口留空 = 不修改订阅里的；局域网设备用「混合端口」上网（HTTP / SOCKS5 都认）。" i=${1}>
+        <${Card} title="入站" desc="端口留空 = 不开（订阅里自带的端口不用）；局域网设备用「混合端口」上网（HTTP / SOCKS5 都认）。" i=${1}>
             <${Field} label="允许局域网访问" desc="关掉后代理端口只有 NAS 本机能用">${onOff(b('allow_lan'), '允许局域网访问')}<//>
-            <${Field} label="混合端口" wide><${NumberInput} ...${b('mixed_port')} max="65535" placeholder="不修改" /><//>
-            <${Field} label="HTTP 端口" wide><${NumberInput} ...${b('http_port')} max="65535" placeholder="不修改" /><//>
-            <${Field} label="SOCKS 端口" wide><${NumberInput} ...${b('socks_port')} max="65535" placeholder="不修改" /><//>
-            <${Field} label="Redirect 端口" wide><${NumberInput} ...${b('redir_port')} max="65535" placeholder="不修改" /><//>
-            <${Field} label="TPROXY 端口" desc="透明代理的旁路由（局域网设备）走这个端口，开旁路由时不能留空" wide><${NumberInput} ...${b('tproxy_port')} max="65535" placeholder="不修改" /><//>
+            <${Field} label="混合端口" wide><${NumberInput} ...${b('mixed_port')} max="65535" placeholder="不开" /><//>
+            <${Field} label="HTTP 端口" wide><${NumberInput} ...${b('http_port')} max="65535" placeholder="不开" /><//>
+            <${Field} label="SOCKS 端口" wide><${NumberInput} ...${b('socks_port')} max="65535" placeholder="不开" /><//>
+            <${Field} label="Redirect 端口" wide><${NumberInput} ...${b('redir_port')} max="65535" placeholder="不开" /><//>
+            <${Field} label="TPROXY 端口" desc="透明代理的旁路由（局域网设备）走这个端口，开旁路由时不能留空" wide><${NumberInput} ...${b('tproxy_port')} max="65535" placeholder="不开" /><//>
             <${Field} label="代理端口要密码" desc="打开后连代理端口要用下面的账号密码">${onOff(b('authentication'), '代理端口要密码')}<//>
             ${v('authentication') && html`
                 <${Field} label="局域网与本机免密" desc="只有从外网（经路由器端口转发）连进来的要密码">${onOff(b('skip_auth_lan'), '局域网与本机免密')}<//>

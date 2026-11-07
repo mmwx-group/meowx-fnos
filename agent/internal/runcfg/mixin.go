@@ -38,6 +38,11 @@ func Build(profile []byte, in Inputs) ([]byte, error) {
 		cfg = map[string]any{}
 	}
 
+	// NAS 上开哪些端口只看设置：订阅自带的入站端口一律不用（机场订阅常写 port: 7890 / socks-port: 7891，
+	// 与混合端口、redir 端口撞了会有一个起不来，7890 就只剩 HTTP、不收 SOCKS5）
+	for _, k := range []string{"port", "socks-port", "mixed-port", "redir-port", "tproxy-port"} {
+		delete(cfg, k)
+	}
 	mixin := buildMixin(in)
 	merge(cfg, mixin)
 
@@ -203,6 +208,7 @@ func buildMixin(in Inputs) map[string]any {
 }
 
 // trim 去掉空值（同 include.uc 的 trim_all）：""、0、空列表、空映射不盖订阅里的。布尔照写（false 也是设置）。
+// 入站端口例外：订阅里的在 Build 里先删掉了，这里的 0 就是不开。
 func trim(v any) any {
 	switch x := v.(type) {
 	case map[string]any:

@@ -10,6 +10,8 @@ import (
 
 const sample = `
 mixed-port: 1234
+port: 7890
+socks-port: 7891
 mode: global
 dns:
   enable: true
@@ -58,6 +60,16 @@ func TestMixinOverridesAndKeeps(t *testing.T) {
 	// 订阅里开的 TUN 一律关掉（透明代理由控制服务管），外部控制只听本机
 	if cfg["tun"].(map[string]any)["enable"] != false || cfg["external-controller"] != "127.0.0.1:9090" {
 		t.Fatalf("TUN / 外部控制没按控制服务的来：%v %v", cfg["tun"], cfg["external-controller"])
+	}
+	// 订阅自带的入站端口不用：不然 port 7890 / socks-port 7891 与混合端口、redir 端口撞
+	if _, ok := cfg["port"]; ok {
+		t.Fatalf("订阅的 HTTP 端口应当去掉：%v", cfg["port"])
+	}
+	if _, ok := cfg["socks-port"]; ok {
+		t.Fatalf("订阅的 SOCKS 端口应当去掉：%v", cfg["socks-port"])
+	}
+	if cfg["redir-port"] != 7891 || cfg["tproxy-port"] != 7892 {
+		t.Fatalf("设置里的端口没写上：%v %v", cfg["redir-port"], cfg["tproxy-port"])
 	}
 	// YAML 锚点展开后节点仍在
 	if len(cfg["proxies"].([]any)) != 1 {
