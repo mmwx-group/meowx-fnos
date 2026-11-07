@@ -30,7 +30,8 @@ func envOr(key, def string) string {
 }
 
 func main() {
-	a, err := app.New(version, envOr("MEOWX_DATA", "/data"), envOr("MEOWX_CORE", "/usr/bin/meowx-core"), envOr("MEOWX_DASHBOARD", ""))
+	a, err := app.New(version, envOr("MEOWX_DATA", "/data"), envOr("MEOWX_CORE", "/usr/bin/meowx-core"),
+		envOr("MEOWX_TAILSCALE_DIR", "/usr/bin"), envOr("MEOWX_DASHBOARD", ""))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -51,6 +52,9 @@ func main() {
 	go func() {
 		if a.Settings.Get().Enabled {
 			_ = a.Apply(ctx)
+		}
+		if a.Settings.Get().Mesh.Enabled {
+			_ = a.Mesh.Apply(ctx)
 		}
 	}()
 	go func() {

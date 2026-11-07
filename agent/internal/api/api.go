@@ -57,6 +57,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/panel/subscriptions", s.panelSubscriptions)
 	mux.HandleFunc("POST /api/panel/import", s.panelImport)
 	mux.HandleFunc("POST /api/panel/po0", s.panelPo0)
+	mux.HandleFunc("POST /api/panel/ggy", s.panelGGY)
+
+	mux.HandleFunc("GET /api/mesh", s.meshView)
+	mux.HandleFunc("PUT /api/mesh", s.meshSave)
+	mux.HandleFunc("POST /api/mesh/leave", s.meshLeave)
 
 	mux.Handle("/api/core/", s.coreProxy())
 	mux.Handle("/", http.FileServerFS(s.Web))
@@ -483,6 +488,70 @@ func (s *Server) panelPo0(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write(out)
+}
+
+// POST /api/panel/ggy {"action":"status|enable|disable|add|remove|report","token","index"}
+func (s *Server) panelGGY(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action string `json:"action"`
+		Token  string `json:"token"`
+		Index  int    `json:"index"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	args := []string{"ggy", body.Action}
+	switch body.Action {
+	case "status", "enable", "disable", "report":
+	case "add":
+		args = append(args, body.Token)
+	case "remove":
+		args = append(args, strconv.Itoa(body.Index))
+	default:
+		writeErr(w, http.StatusBadRequest, errors.New("未知操作"))
+		return
+	}
+	s.panelRun(w, r, args...)
+}
+
+// ---------- 喵窝 ----------
+
+// GET /api/mesh：设置、状态、本机与其它设备，外加可开放的局域网网段候选
+func (s *Server) meshView(w http.ResponseWriter, r *http.Request) {
+	var lan []string
+	for _, i := range hijack.Discover().Physical {
+		lan = append(lan, i.Subnets...)
+	}
+	writeJSON(w, map[string]any{"mesh": s.App.Mesh.View(r.Context()), "lan": lan})
+}
+
+// PUT /api/mesh {设置}：存好就按设置入网 / 退出（入网最多一两分钟）
+func (s *Server) meshSave(w http.ResponseWriter, r *http.Request) {
+	var next store.Mesh
+	if !readJSON(w, r, &next) {
+		return
+	}
+	if _, err := s.App.Settings.Update(func(cur *store.Settings) error {
+		cur.Mesh = next
+		return nil
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	if err := s.App.Mesh.Apply(ctx); err != nil {
+		writeJSON(w, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// POST /api/mesh/leave：从主控删掉这台设备、撤掉网段、关开关
+func (s *Server) meshLeave(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	writeJSON(w, map[string]any{"ok": true, "warning": s.App.Mesh.Leave(ctx)})
 }
 
 // ---------- 内核的 REST API（节点、连接、日志，WebSocket 也转） ----------

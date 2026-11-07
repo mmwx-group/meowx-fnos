@@ -34,6 +34,9 @@ func (p Paths) PanelEnv() []string {
 		"MEOWX_PO0_STATE=" + filepath.Join(p.Panel, "po0.json"),
 		"MEOWX_GGY_RESULTS=" + filepath.Join(p.Panel, "ggy-results.json"),
 		"MEOWX_APP_LOG=" + filepath.Join(p.Panel, "app.log"),
+		"MEOWX_GGY_STATE=" + filepath.Join(p.Panel, "ggy.json"), // 补丁 005：没有 uci，GGY 设置存文件
+		"MEOWX_MESH_OS=fnos", // 补丁 004：喵窝入网时报给主控的系统 / 客户端
+		"MEOWX_MESH_CLIENT=meowx-fnos",
 	}
 }
 

@@ -179,6 +179,7 @@ func Defaults() Settings {
 			},
 			Sniffer: Sniffer{Enabled: true},
 		},
+		Mesh: Mesh{HostAccess: true},
 		Proxy: Proxy{
 			TCPMode:   "tun",
 			UDPMode:   "tun",
