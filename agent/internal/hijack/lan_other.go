@@ -9,3 +9,7 @@ import "errors"
 func ApplyLAN(LANPlan) error { return errors.New("旁路由只在 Linux 上可用") }
 
 func CleanupLAN() {}
+
+func ApplyHost(HostPlan) error { return errors.New("只在 Linux 上可用") }
+
+func CleanupHost() {}

@@ -116,6 +116,9 @@ func (a *App) buildConfig(profile []byte) ([]byte, error) {
 		UIPath:            a.UIPath,
 		TUN:               hijack.TUN(s, hijack.Discover()),
 		ExtraFakeIPFilter: a.Mesh.Hosts(),
+		RoutingMark:       hijack.CoreMark,
+		// 透明代理开着、不代理 IPv6：内核的 DNS 不回 AAAA，应用都走 IPv4（进 TUN / TPROXY）
+		NoAAAA: s.Proxy.Enabled && !s.Proxy.IPv6 && (s.Proxy.HostProxy || s.Proxy.LANProxy),
 	})
 }
 
@@ -153,6 +156,7 @@ func (a *App) applyLocked(ctx context.Context) error {
 	s := a.Settings.Get()
 	if !s.Enabled {
 		hijack.CleanupLAN()
+		hijack.CleanupHost()
 		a.Core.Stop()
 		return nil
 	}
@@ -180,8 +184,14 @@ func (a *App) applyLocked(ctx context.Context) error {
 	}
 	a.Log.Add("agent", "启动内核")
 	hijack.CleanupLAN()
+	hijack.CleanupHost()
 	if err := a.Core.Start(ctx); err != nil {
 		return err
+	}
+	if plan := hijack.HostRules(s); plan != nil {
+		if err := hijack.ApplyHost(*plan); err != nil {
+			return fmt.Errorf("本机 DNS / fake-ip 规则没下发成功：%w", err)
+		}
 	}
 	// 旁路由：内核的 tproxy 端口起来以后再把局域网设备的流量交过去
 	if plan := hijack.LAN(s, hijack.Discover()); plan != nil {
@@ -196,6 +206,7 @@ func (a *App) applyLocked(ctx context.Context) error {
 // Shutdown：容器停止时（先撤旁路由，再停内核：内核退出时撤掉自己的 TUN 与路由；喵窝收掉 tailscaled 与防火墙）
 func (a *App) Shutdown() {
 	hijack.CleanupLAN()
+	hijack.CleanupHost()
 	a.Core.Stop()
 	a.Mesh.Shutdown()
 }

@@ -37,7 +37,8 @@ func main() {
 	}
 	a.Log.Add("agent", "MeowX "+version+" 启动")
 	a.RecoverTrial()
-	hijack.CleanupLAN() // 上次崩溃留下的旁路由规则
+	hijack.CleanupLAN() // 上次崩溃留下的规则
+	hijack.CleanupHost()
 
 	web, _ := fs.Sub(webFS, "web")
 	srv := &http.Server{

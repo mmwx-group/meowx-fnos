@@ -81,6 +81,7 @@ func TUN(s store.Settings, h Host) map[string]any {
 		"auto-detect-interface": true,
 		"auto-redirect":         p.TCPMode == "redirect",
 		"strict-route":          false,
+		"iproute2-table-index":  TUNTable,
 	}
 	if s.Mixin.TUN.MTU > 0 {
 		t["mtu"] = s.Mixin.TUN.MTU
@@ -138,6 +139,25 @@ func LANInterfaces(chosen []string, h Host) []string {
 		out = append(out, i.Name)
 	}
 	return out
+}
+
+// HostRules：NAS 本机 / 容器透明代理开着时，另外要下发的 DNS 重定向与 fake-ip 策略路由；nil = 不需要
+func HostRules(s store.Settings) *HostPlan {
+	p := s.Proxy
+	if TUN(s, Host{}) == nil {
+		return nil
+	}
+	plan := &HostPlan{CoreMark: CoreMark, TUNTable: TUNTable}
+	if p.HostProxy && p.DNSHijack && s.Mixin.DNS.Enabled {
+		plan.DNSPort = listenPort(s.Mixin.DNS.Listen)
+	}
+	if s.Mixin.DNS.Mode == "fake-ip" {
+		plan.FakeIPRange = s.Mixin.DNS.FakeIPRange
+		if _, n, err := net.ParseCIDR(plan.FakeIPRange); err == nil {
+			plan.FakeIPRange = n.String()
+		}
+	}
+	return plan
 }
 
 // LAN 生成旁路由的规则计划；nil = 不开旁路由

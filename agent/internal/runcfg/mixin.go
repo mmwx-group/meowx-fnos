@@ -25,6 +25,7 @@ type Inputs struct {
 	Listeners         []map[string]any
 	ExtraFakeIPFilter []string // 喵窝：主控 / 中继的域名（fake-ip 下要拿真实地址）
 	RoutingMark       int
+	NoAAAA            bool // DNS 不回 IPv6 地址
 }
 
 // Build 生成运行配置
@@ -97,6 +98,14 @@ func Build(profile []byte, in Inputs) ([]byte, error) {
 	}
 	if in.RoutingMark != 0 {
 		cfg["routing-mark"] = in.RoutingMark
+	}
+	if in.NoAAAA {
+		dns, _ := cfg["dns"].(map[string]any)
+		if dns == nil {
+			dns = map[string]any{}
+			cfg["dns"] = dns
+		}
+		dns["ipv6"] = false
 	}
 	if len(in.ExtraFakeIPFilter) > 0 {
 		dns, _ := cfg["dns"].(map[string]any)

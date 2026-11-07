@@ -5,6 +5,20 @@ import (
 	"net"
 )
 
+// 内核的出站连接（含它自己的 DNS 查询）打的 routing-mark：NAS 本机 DNS 重定向靠它放行内核自己
+const CoreMark = 0x2026
+
+// TUN 的策略路由表（显式写进内核配置，fake-ip 那条规则要指向它）
+const TUNTable = 2022
+
+// HostPlan：NAS 本机透明代理之外要下发的（host_linux.go）
+type HostPlan struct {
+	DNSPort     uint16 // 0 = 不劫持本机 DNS
+	CoreMark    uint32
+	FakeIPRange string // 发往这里的一律进 TUN
+	TUNTable    int
+}
+
 // LANPlan：旁路由要下发的规则（lan.go，只在 Linux 上真的下发）
 type LANPlan struct {
 	Interfaces []string // 局域网入口网卡
