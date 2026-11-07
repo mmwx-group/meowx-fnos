@@ -18,6 +18,18 @@
 | GET | `/api/logs?after=<序号>&source=core\|agent` | 日志增量：`[{seq, time(ms), source, text}]`，界面每 2 秒拿一次 `after=上次最大 seq` |
 | DELETE | `/api/logs` | 清空 |
 
+## 透明代理
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/proxy` | 试用状态 `{pending, deadline(秒)}`：打开或改了透明代理后进试用期，到 `deadline` 没确认就自动关 |
+| POST | `/api/proxy/keep` | 确认保留 |
+| GET | `/api/host` | 宿主机网卡 `{Physical: [{name, subnets, up}], Bridges: [...]}`，透明代理页选局域网入口用 |
+
+`PUT /api/settings` 的回包多一个 `trial`（同 `GET /api/proxy`）。设置语义：`proxy.host_proxy` = NAS 本机、`container_proxy` = 其它容器（都走 TUN；
+`tcp_mode` 只对它们有效：`tun` 或 `redirect`），`lan_proxy` = 旁路由（局域网设备把网关指向 NAS，走 TPROXY，与 `tcp_mode` 无关），
+`lan_interfaces` 空 = 全部物理网卡。旁路由只代理 IPv4（第一版）。代理其它容器时，容器发布到外面的端口可能受影响，界面上要提示。
+
 ## 订阅
 
 | 方法 | 路径 | 说明 |
