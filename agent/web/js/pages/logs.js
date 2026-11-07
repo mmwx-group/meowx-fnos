@@ -77,7 +77,7 @@ export function Logs({ active }) {
         ${error && html`<p class="error-text">${error}</p>`}
         <div class="logbox" ref=${box} onScroll=${onScroll}>
             ${shown.length == 0 && html`<div class="muted">还没有日志。</div>`}
-            ${shown.map((l) => html`<div key=${l.seq} class=${'logline is-' + l.level}>
+            ${shown.map((l) => html`<div key=${l.seq} class=${'logline is-' + l.level + ' is-' + l.source}>
                 <span class="logline__time">${clockTime(l.time)}</span>
                 <span class="logline__src">${sources[l.source] || l.source}</span>
                 <span class="logline__text">${l.text}</span>

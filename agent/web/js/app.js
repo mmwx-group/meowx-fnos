@@ -95,8 +95,8 @@ function TrialBanner({ trial }) {
 function LoginScreen() {
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const submit = async (e) => {
-        e?.preventDefault();
+    // 回车在表单里会「点」提交按钮，只由按钮的 onClick 登录一次
+    const submit = async () => {
         setError('');
         try {
             await login(password);
@@ -110,10 +110,10 @@ function LoginScreen() {
             <${Logo} />
             <div class="hero__title">MeowX</div>
             <p class="hint">管理页面设了访问密码，请先输入。</p>
-            <form class="inline" onSubmit=${submit}>
+            <form class="inline" onSubmit=${(e) => e.preventDefault()}>
                 <input class="input" type="password" placeholder="访问密码" autocomplete="current-password" autofocus
                     value=${password} onInput=${(e) => setPassword(e.currentTarget.value)} />
-                <${Button} kind="primary" type="submit" onClick=${() => submit()}>登录<//>
+                <${Button} kind="primary" type="submit" onClick=${submit}>登录<//>
             </form>
             ${error && html`<p class="error-text">${error}</p>`}
         </div>
@@ -134,6 +134,7 @@ function App() {
         setAnim(order(id) > order(current) ? 'pane--from-right' : 'pane--from-left');
         setCurrent(id);
         setVisited((v) => new Set(v).add(id));
+        window.scrollTo({ top: 0 });
         if (push) {
             history.pushState(null, '', '#' + id);
         }

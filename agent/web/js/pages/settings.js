@@ -61,7 +61,7 @@ export function SettingsPage({ active }) {
     const running = !!status?.core?.running;
     useEffect(() => {
         if (active && running) {
-            get('/core/version').then((v) => setCoreVersion(v?.version || ''), () => { });
+            get('/core/version').then((v) => setCoreVersion(v?.version || '未标版本'), () => { });
         }
     }, [active, running]);
 

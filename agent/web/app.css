@@ -1820,3 +1820,43 @@ code,
         transition: none !important;
     }
 }
+
+/* 次级底上的按钮换成卡片色，不然看不出是按钮 */
+.addr .btn,
+.kv .btn,
+.item .btn:not(.primary):not(.danger):not(.soft) {
+    background: var(--elev);
+}
+
+/* 窄卡片里的「地址 + token + 添加」：放不下就折行 */
+.inline.wrap {
+    flex-wrap: wrap;
+}
+
+.inline.wrap > .input {
+    flex: 1 1 220px;
+}
+
+.conn .badge.is-muted,
+.item.is-current .badge.is-muted {
+    background: var(--elev);
+}
+
+.logline.is-core .logline__src {
+    color: var(--t2);
+}
+
+/* 喵窝：其它设备的在线点 */
+.peer-dot {
+    flex: none;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--t2);
+    opacity: .5;
+}
+
+.peer-dot.is-online {
+    background: var(--good);
+    opacity: 1;
+}
