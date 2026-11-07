@@ -204,6 +204,7 @@ export function Overview({ active, go }) {
     useEffect(() => {
         if (active) {
             loadSettings();
+            refreshProfiles().catch(() => { });
         }
     }, [active]);
     return html`<div>

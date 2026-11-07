@@ -115,7 +115,7 @@ function EditDialog({ profile: p, onClose }) {
     return html`<${Dialog} title="编辑订阅" onClose=${onClose} actions=${html`
         <${Button} onClick=${onClose}>取消<//>
         <${Button} kind="primary" onClick=${save}>保存<//>`}>
-        <${Field} label="订阅名称" wide><${TextInput} ...${{ value: form.name, onChange: set('name') }} placeholder="留空则自动使用订阅提供的名称" /><//>
+        <${Field} label="订阅名称" wide><${TextInput} value=${form.name} onChange=${set('name')} placeholder="留空则自动使用订阅提供的名称" autofocus /><//>
         ${p.url && html`<${Field} label="订阅链接" wide><${TextInput} type="url" value=${form.url} onChange=${set('url')} /><//>`}
         ${p.url && html`<${Field} label="订阅信息链接" desc="单独取用量 / 到期的地址，一般不用填" wide><${TextInput} type="url" value=${form.info_url} onChange=${set('info_url')} placeholder="可选" /><//>`}
         ${p.url && html`<${Field} label="用户代理（UA）" desc="留空 = MeowX 官方客户端（主控会给官方内核才支持的节点）" wide>

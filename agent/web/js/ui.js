@@ -1,5 +1,5 @@
 // 公共元件：卡片、表单行、开关、分段、按钮（自带转圈）、列表输入、弹窗、提示
-import { html, useState, useEffect, useRef } from './lib.js';
+import { html, render, useState, useEffect, useRef } from './lib.js';
 import { useStore, dismissToast, toast, setDirty, update } from './store.js';
 import { get, put } from './api.js';
 import { clone, same, getIn, setIn, merge3, formatBytes, relativeTime } from './util.js';
@@ -113,19 +113,42 @@ export function Button({ onClick, kind = '', small, disabled, children, title, t
         disabled=${disabled} onClick=${click}>${children}</button>`;
 }
 
+// 渲染到 <body> 下单独的节点：弹窗不受所在卡片的变换 / 裁切影响
+function Portal({ children }) {
+    const host = useRef(null);
+    if (!host.current) {
+        host.current = document.createElement('div');
+        document.body.appendChild(host.current);
+    }
+    const focused = useRef(false);
+    useEffect(() => {
+        render(children, host.current);
+        // 动态插入的元素 autofocus 不一定生效：第一次画出来时手动聚焦
+        if (!focused.current) {
+            focused.current = true;
+            host.current.querySelector('[autofocus]')?.focus();
+        }
+    });
+    useEffect(() => () => {
+        render(null, host.current);
+        host.current.remove();
+    }, []);
+    return null;
+}
+
 export function Dialog({ title, onClose, children, actions }) {
     useEffect(() => {
         const key = (e) => e.key == 'Escape' && onClose();
         document.addEventListener('keydown', key);
         return () => document.removeEventListener('keydown', key);
     }, [onClose]);
-    return html`<div class="overlay" onClick=${(e) => e.target == e.currentTarget && onClose()}>
+    return html`<${Portal}><div class="overlay" onClick=${(e) => e.target == e.currentTarget && onClose()}>
         <div class="dialog" role="dialog" aria-modal="true">
             <h2 class="dialog__title">${title}</h2>
             ${children}
             <div class="dialog__actions">${actions}</div>
         </div>
-    </div>`;
+    </div><//>`;
 }
 
 export function Toasts() {
