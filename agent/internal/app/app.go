@@ -15,6 +15,7 @@ import (
 
 	"github.com/mmwx-group/meowx-fnos/agent/internal/core"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/mesh"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/runcfg"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 )
@@ -27,6 +28,7 @@ type App struct {
 	Profiles *store.ProfileStore
 	Core     *core.Supervisor
 	Log      *core.Ring
+	Mesh     *mesh.Manager
 
 	applyMu   sync.Mutex
 	lastError string
@@ -37,7 +39,7 @@ type App struct {
 
 const apiListen = "127.0.0.1:9090"
 
-func New(version, dataDir, coreBinary, uiPath string) (*App, error) {
+func New(version, dataDir, coreBinary, tsBinDir, uiPath string) (*App, error) {
 	log := core.NewRing(3000)
 	settings, err := store.OpenSettings(dataDir)
 	if err != nil {
@@ -63,6 +65,15 @@ func New(version, dataDir, coreBinary, uiPath string) (*App, error) {
 		},
 	}
 	_ = os.MkdirAll(a.Core.Paths.HomeDir, 0o755)
+	a.Mesh = &mesh.Manager{
+		Dir: filepath.Join(dataDir, "mesh"), Bin: tsBinDir, Core: a.Core, Log: log, Settings: settings,
+		// 主控 / 中继域名变了：内核在跑就重载，把它们加进 fake-ip-filter（tailscaled 才拿得到真实地址）
+		OnHostsChanged: func() {
+			if a.Core.Status().Running {
+				go func() { _ = a.Apply(context.Background()) }()
+			}
+		},
+	}
 	// 新订阅换上去之前用设置混进去、让内核试读（同 OpenWrt 版：按真实设置混入出完整配置再测）
 	profiles.Validate = func(ctx context.Context, data []byte) error {
 		if !a.Settings.Get().TestProfile {
@@ -98,12 +109,13 @@ func (a *App) LastError() string {
 func (a *App) buildConfig(profile []byte) ([]byte, error) {
 	s := a.Settings.Get()
 	return runcfg.Build(profile, runcfg.Inputs{
-		Settings:      s,
-		Po0ReportURLs: a.po0ReportURLs(),
-		APIListen:     apiListen,
-		APISecret:     a.Core.Secret,
-		UIPath:        a.UIPath,
-		TUN:           hijack.TUN(s, hijack.Discover()),
+		Settings:          s,
+		Po0ReportURLs:     a.po0ReportURLs(),
+		APIListen:         apiListen,
+		APISecret:         a.Core.Secret,
+		UIPath:            a.UIPath,
+		TUN:               hijack.TUN(s, hijack.Discover()),
+		ExtraFakeIPFilter: a.Mesh.Hosts(),
 	})
 }
 
@@ -181,10 +193,11 @@ func (a *App) applyLocked(ctx context.Context) error {
 	return nil
 }
 
-// Shutdown：容器停止时（先撤旁路由，再停内核：内核退出时撤掉自己的 TUN 与路由）
+// Shutdown：容器停止时（先撤旁路由，再停内核：内核退出时撤掉自己的 TUN 与路由；喵窝收掉 tailscaled 与防火墙）
 func (a *App) Shutdown() {
 	hijack.CleanupLAN()
 	a.Core.Stop()
+	a.Mesh.Shutdown()
 }
 
 // Loop：定时任务（订阅自动更新、白名单上报），每分钟看一次
@@ -221,18 +234,31 @@ func (a *App) autoUpdate(ctx context.Context, now time.Time) {
 	}
 }
 
-// 白名单上报间隔同客户端：有 po0 时每 10 分钟，只有主控账户时每小时；内核没在跑不报
+// 白名单上报间隔同客户端：有 po0 或 GGY 加白时每 10 分钟，只有主控账户时每小时；内核没在跑不报
 func (a *App) reportDue(now, last time.Time) bool {
 	if !a.Core.Status().Running {
 		return false
 	}
 	interval := time.Hour
-	if len(a.po0ReportURLs()) > 0 {
+	if len(a.po0ReportURLs()) > 0 || a.ggyActive() {
 		interval = 10 * time.Minute
 	} else if _, err := os.Stat(filepath.Join(a.Core.Paths.Panel, "panel.json")); err != nil {
 		return false
 	}
 	return now.Sub(last) >= interval
+}
+
+// GGY 加白开着且至少一个 token（与主控账户无关，没登录也报）
+func (a *App) ggyActive() bool {
+	data, err := os.ReadFile(filepath.Join(a.Core.Paths.Panel, "ggy.json"))
+	if err != nil {
+		return false
+	}
+	var st struct {
+		Enabled bool     `json:"enabled"`
+		Tokens  []string `json:"tokens"`
+	}
+	return json.Unmarshal(data, &st) == nil && st.Enabled && len(st.Tokens) > 0
 }
 
 func (a *App) panelReport(ctx context.Context) {

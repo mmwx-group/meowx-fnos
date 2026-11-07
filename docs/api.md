@@ -57,6 +57,22 @@ Profile：`{id, name, url?, info_url?, user_agent?, from_panel?, updated_at(秒)
 | POST | `/api/panel/import` | `{url, name}` 导入账户下的一份并切过去 |
 | POST | `/api/panel/po0` | `{action: status\|enable\|disable\|fetch\|add\|remove, address?, token?, index?}` |
 
+## GGY 加白
+
+`POST /api/panel/ggy` `{action: status|enable|disable|add|remove|report, token?, index?}`：与主控账户无关、没登录也能用；`token` 可以是整条分享链接。
+
+## 喵窝
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/mesh` | `{mesh: View, lan: ["10.10.1.0/24", …]}`；`lan` 是可开放的局域网网段候选 |
+| PUT | `/api/mesh` | 喵窝设置 `{enabled, force_map, host_access, networks, hostname}`：存好按设置入网 / 退出（最多一两分钟）。回 `{ok}` 或 `{error}` |
+| POST | `/api/mesh/leave` | 退出喵窝：主控里删这台设备、撤掉申报的网段、关开关。回 `{ok, warning?}` |
+
+View：`{settings, hostname, state: {router_id, control_url, magic_dns, sites: [{original, advertised, mapped}], advertised, hosts, error, applied_at},
+panel_logged_in, daemon, backend("Running"/"NeedsLogin"…), self: Peer, peers: [Peer], control_url, advertised}`；
+Peer：`{name, dns_name, ip, os, online, relay, direct, routes}`。没登录主控时入网会失败并提示先登录；`host_access` = 喵窝里的设备能不能访问 NAS 本身（缺省开）。
+
 ## 内核 API（节点、连接、规则、日志）
 
 `/api/core/*` 原样转给内核的外部控制（mihomo REST API，WebSocket 也转），例如：

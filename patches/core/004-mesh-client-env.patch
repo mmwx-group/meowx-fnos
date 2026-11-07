@@ -1,0 +1,27 @@
+--- a/core/Clash.Meta/meowx_mesh.go
++++ b/core/Clash.Meta/meowx_mesh.go
+@@ -16,6 +16,7 @@
+ 	"encoding/json"
+ 	"errors"
+ 	"fmt"
++	"os"
+ 	"regexp"
+ 	"strconv"
+ 
+@@ -61,7 +62,15 @@
+ 		if len(args) < 2 || args[1] == "" {
+ 			return nil, errors.New("缺少主机名")
+ 		}
+-		payload := map[string]any{"hostname": args[1], "os": "openwrt", "client": "meowx-openwrt", "version": C.Version}
++		// 系统名 / 客户端名：OpenWrt 版用缺省值，别的外壳（飞牛 NAS 版）经环境变量给
++		meshOS, meshClient := os.Getenv("MEOWX_MESH_OS"), os.Getenv("MEOWX_MESH_CLIENT")
++		if meshOS == "" {
++			meshOS = "openwrt"
++		}
++		if meshClient == "" {
++			meshClient = "meowx-openwrt"
++		}
++		payload := map[string]any{"hostname": args[1], "os": meshOS, "client": meshClient, "version": C.Version}
+ 		if len(args) > 2 && meshDigits.MatchString(args[2]) {
+ 			if id, err := strconv.ParseUint(args[2], 10, 64); err == nil && id > 0 {
+ 				payload["previous_node_id"] = id
