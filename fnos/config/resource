@@ -1,0 +1,13 @@
+{
+    "port-config": {
+        "protocol-file": "meowx.sc"
+    },
+    "docker-project": {
+        "projects": [
+            {
+                "name": "meowx",
+                "path": "docker"
+            }
+        ]
+    }
+}

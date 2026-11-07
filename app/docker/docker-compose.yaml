@@ -1,0 +1,24 @@
+# 网络权限靠这里拿：宿主网络 + NET_ADMIN + /dev/net/tun（飞牛只让官方合作开发者发 root 应用，社群的 Tailscale fpk 也是这么做的）。
+# 镜像在 NAS 上就地构建（见 Dockerfile），不从镜像仓库拉。
+services:
+  meowx:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: meowx-fnos:__VERSION__
+    pull_policy: build
+    container_name: meowx
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      - MEOWX_UI_PORT=7899
+      - TZ=Asia/Shanghai
+    volumes:
+      - ${TRIM_PKGVAR:?}/data:/data
+      - /etc/ssl/certs:/etc/ssl/certs:ro   # 用宿主的 CA 证书（随飞牛系统更新），镜像里不另带
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+    restart: unless-stopped

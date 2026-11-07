@@ -1,0 +1,4 @@
+#!/bin/bash
+. "$(dirname "$0")/common"
+log "调用（$(id -un)）"
+exit 0

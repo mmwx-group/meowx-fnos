@@ -1,0 +1,5 @@
+#!/bin/bash
+. "$(dirname "$0")/common"
+mkdir -p "${TRIM_PKGVAR}/data" 2>/dev/null || true
+log "调用（$(id -un)）TRIM_APPDEST=${TRIM_APPDEST} TRIM_PKGVAR=${TRIM_PKGVAR}"
+exit 0

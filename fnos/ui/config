@@ -1,0 +1,14 @@
+{
+    ".url": {
+        "meowx.Application": {
+            "title": "MeowX",
+            "desc": "MeowX 代理客户端",
+            "icon": "images/{0}.png",
+            "type": "url",
+            "port": "7899",
+            "protocol": "http",
+            "url": "/",
+            "allUsers": false
+        }
+    }
+}

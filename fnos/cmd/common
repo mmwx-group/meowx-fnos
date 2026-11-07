@@ -1,0 +1,12 @@
+#!/bin/bash
+# 各生命周期脚本共用。注意：这些脚本以应用自己的账号（meowx）运行，碰不到 Docker；容器由飞牛按 docker-project 起停。
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+if [ -d "${TRIM_PKGVAR:-/nonexistent}" ]; then
+    MEOWX_LOG="${TRIM_PKGVAR}/meowx-install.log"
+else
+    MEOWX_LOG="/tmp/meowx-install.log"   # install_init 时应用数据目录还没建
+fi
+log() {
+    echo "$(date '+%F %T') [$(basename "$0")] $*" >> "$MEOWX_LOG" 2>/dev/null || true
+}
+CONTAINER=meowx

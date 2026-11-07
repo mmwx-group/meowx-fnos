@@ -1,0 +1,15 @@
+appname         = meowx
+version         = 0.0.1
+display_name    = MeowX
+platform        = x86
+maintainer      = MeowX
+maintainer_url  = https://meowx.net
+distributor     = MeowX
+distributor_url = https://meowx.net
+desktop_uidir   = ui
+desktop_applaunchname = meowx.Application
+service_port    = 7899
+checkport       = false
+desc            = MeowX 代理客户端：NAS 本机与局域网透明代理、喵窝组网。
+source          = thirdparty
+checksum        =
