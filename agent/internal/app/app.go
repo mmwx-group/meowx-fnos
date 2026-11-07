@@ -65,6 +65,7 @@ func New(version, dataDir, coreBinary, tsBinDir, uiPath string) (*App, error) {
 		},
 	}
 	_ = os.MkdirAll(a.Core.Paths.HomeDir, 0o755)
+	seedGeo(a.Core.Paths.HomeDir, log)
 	a.Mesh = &mesh.Manager{
 		Dir: filepath.Join(dataDir, "mesh"), Bin: tsBinDir, Core: a.Core, Log: log, Settings: settings,
 		// 主控 / 中继域名变了：内核在跑就重载，把它们加进 fake-ip-filter（tailscaled 才拿得到真实地址）
@@ -86,6 +87,29 @@ func New(version, dataDir, coreBinary, tsBinDir, uiPath string) (*App, error) {
 		return a.Core.Test(ctx, cfg)
 	}
 	return a, nil
+}
+
+// seedGeo：随包带的 geo 数据（/usr/share/meowx/geo）在内核工作目录里没有时复制过去——第一次启动不用连 GitHub；
+// 已经有的（内核自动更新过的）不覆盖
+func seedGeo(home string, log *core.Ring) {
+	src := os.Getenv("MEOWX_GEO_DIR")
+	if src == "" {
+		src = "/usr/share/meowx/geo"
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		dst := filepath.Join(home, e.Name())
+		if _, err := os.Stat(dst); err == nil {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err == nil && store.WriteFileAtomic(dst, data, 0o644) == nil {
+			log.Add("agent", "放入随包的 "+e.Name())
+		}
+	}
 }
 
 // 内核外部控制的密钥：第一次生成、存在数据卷里

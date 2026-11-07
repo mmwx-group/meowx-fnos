@@ -30,6 +30,7 @@ else
     "$ROOT/scripts/build-core.sh" "$GOARCH" "$ROOTFS/usr/bin/meowx-core"
 fi
 "$ROOT/scripts/fetch-tailscale.sh" "$GOARCH" "$ROOTFS/usr/bin" >/dev/null
+"$ROOT/scripts/fetch-geo.sh" "$ROOTFS/usr/share/meowx/geo" >/dev/null
 
 # 2. 应用目录
 sed "s/__VERSION__/$VERSION/g" "$ROOT/app/docker/docker-compose.yaml" > "$WORK/target/docker/docker-compose.yaml"
