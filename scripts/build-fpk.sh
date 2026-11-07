@@ -1,7 +1,7 @@
 #!/bin/bash
 # 打飞牛安装包：scripts/build-fpk.sh <版本> [x86|arm]
 #
-# 产物 dist/MeowX-<版本>-fnos-<平台>.fpk = tar.gz：
+# 产物 dist/meowx-fnos-<版本>-<平台>.fpk = tar.gz：
 #   app.tgz（应用目录：docker/{docker-compose.yaml,Dockerfile,rootfs/}）、manifest、cmd/、config/、ui/、图标、meowx.sc
 # 镜像由飞牛起容器时按 Dockerfile 就地构建（FROM scratch + rootfs 里的静态程序），不连镜像仓库。
 set -euo pipefail
@@ -55,6 +55,6 @@ sed -e "s/^version .*/version         = $VERSION/" \
     -e "s/^checksum .*/checksum        = $CHECKSUM/" \
     "$ROOT/fnos/manifest" > "$WORK/pkg/manifest"
 
-OUT="$DIST/MeowX-${VERSION}-fnos-${PLATFORM}.fpk"
+OUT="$DIST/meowx-fnos-${VERSION}-${PLATFORM}.fpk"
 (cd "$WORK/pkg" && tar "${TAR_FLAGS[@]}" -czf "$OUT" *)
 echo "$OUT ($(du -h "$OUT" | cut -f1))"

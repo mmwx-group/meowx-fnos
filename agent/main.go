@@ -37,7 +37,8 @@ func main() {
 	}
 	a.Log.Add("agent", "MeowX "+version+" 启动")
 	a.RecoverTrial()
-	hijack.CleanupLAN() // 上次崩溃留下的规则
+	a.TrialIfUnconfirmed() // 停着时改过透明代理、之后才开起来的（如改完就重启了容器）：这次启动先进试用期
+	hijack.CleanupLAN()    // 上次崩溃留下的规则
 	hijack.CleanupHost()
 
 	web, _ := fs.Sub(webFS, "web")

@@ -12,7 +12,7 @@
 
 ## 安装
 
-1. 到 [Releases](https://github.com/mmwx-group/meowx-fnos/releases) 下载安装包：x86 机器选 `MeowX-<版本>-fnos-x86.fpk`，ARM 机器选 `MeowX-<版本>-fnos-arm.fpk`。
+1. 到 [Releases](https://github.com/mmwx-group/meowx-fnos/releases) 下载安装包：x86 机器选 `meowx-fnos-<版本>-x86.fpk`，ARM 机器选 `meowx-fnos-<版本>-arm.fpk`。
 2. 飞牛「应用中心」→ 侧栏底部「手动安装」→ 上传 fpk。
 3. 装好后在桌面打开 MeowX，或用浏览器访问 `http://<NAS 的地址>:7899`。
 
@@ -26,7 +26,7 @@
 ## 从源码打包
 
 ```sh
-scripts/build-fpk.sh <版本> [x86|arm]   # 产物在 dist/MeowX-<版本>-fnos-<平台>.fpk
+scripts/build-fpk.sh <版本> [x86|arm]   # 产物在 dist/meowx-fnos-<版本>-<平台>.fpk
 ```
 
 要 Go 1.27、git、curl。内核从 [meowx-core](https://github.com/mmwx-group/meowx-core) 按 `scripts/build-core.sh` 里固定的提交编译，

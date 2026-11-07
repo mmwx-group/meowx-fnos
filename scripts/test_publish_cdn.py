@@ -23,21 +23,22 @@ class PublishCDNTest(unittest.TestCase):
         return path
 
     def test_file_entry(self):
-        f = p.file_entry(self.fpk('MeowX-0.1.0-fnos-arm.fpk', b'abc'), '0.1.0')
+        f = p.file_entry(self.fpk('meowx-fnos-0.1.0-arm.fpk', b'abc'), '0.1.0')
+        self.assertEqual(p.file_entry(self.fpk('meowx-fnos-0.2.0-pre1-x86.fpk'), '0.2.0-pre1')['arch'], 'x86_64')
         self.assertEqual(f['arch'], 'arm64')
         self.assertEqual(f['kind'], 'fpk')
         self.assertEqual(f['size'], 3)
-        self.assertEqual(f['url'], 'https://dl.miaomiaowux.com/meowx/fnos/MeowX-0.1.0-fnos-arm.fpk')
+        self.assertEqual(f['url'], 'https://dl.miaomiaowux.com/meowx/fnos/meowx-fnos-0.1.0-arm.fpk')
         self.assertEqual(f['sha256'], 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
 
     def test_file_entry_rejects_wrong_name_or_version(self):
         with self.assertRaises(SystemExit):
-            p.file_entry(self.fpk('meowx_0.1.0_x86.fpk'), '0.1.0')
+            p.file_entry(self.fpk('MeowX-0.1.0-fnos-x86.fpk'), '0.1.0')
         with self.assertRaises(SystemExit):
-            p.file_entry(self.fpk('MeowX-0.1.1-fnos-x86.fpk'), '0.1.0')
+            p.file_entry(self.fpk('meowx-fnos-0.1.1-x86.fpk'), '0.1.0')
 
     def test_entry_orders_x86_first(self):
-        files = [p.file_entry(self.fpk(f'MeowX-0.1.0-fnos-{a}.fpk'), '0.1.0') for a in ('arm', 'x86')]
+        files = [p.file_entry(self.fpk(f'meowx-fnos-0.1.0-{a}.fpk'), '0.1.0') for a in ('arm', 'x86')]
         e = p.fnos_entry('0.1.0', '0909705', files, 'T')
         self.assertEqual([f['arch'] for f in e['files']], ['x86_64', 'arm64'])
         self.assertEqual((e['version'], e['core'], e['releasedAt']), ('0.1.0', '0909705', 'T'))

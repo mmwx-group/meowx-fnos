@@ -20,6 +20,27 @@ type TrialStatus struct {
 
 func (a *App) trialPath() string { return filepath.Join(a.DataDir, "proxy-trial.json") }
 
+// 透明代理改过、但那次没有真正套用（MeowX 停着时保存 / 只存不套用）：标记一下，真正套用时（点「启动」、容器重启）补一个试用期。
+// 以前停着时改了透明代理再点启动，规则直接生效、没有试用期，写错了就把 NAS 的网络弄断
+func (a *App) unconfirmedPath() string { return filepath.Join(a.DataDir, "proxy-unconfirmed") }
+
+// MarkUnconfirmed：透明代理设置改了，这次没套用
+func (a *App) MarkUnconfirmed() {
+	_ = store.WriteFileAtomic(a.unconfirmedPath(), []byte("1"), 0o600)
+}
+
+// TrialIfUnconfirmed：套用之前调：开着 MeowX 与透明代理、又有没套用过的透明代理改动 → 进试用期
+func (a *App) TrialIfUnconfirmed() {
+	s := a.Settings.Get()
+	if !s.Enabled || !s.Proxy.Enabled {
+		return
+	}
+	if _, err := os.Stat(a.unconfirmedPath()); err != nil {
+		return
+	}
+	a.StartTrial(s.Proxy.KeepMinutes)
+}
+
 func (a *App) Trial() TrialStatus {
 	data, err := os.ReadFile(a.trialPath())
 	if err != nil {
@@ -40,6 +61,7 @@ func (a *App) StartTrial(minutes int) {
 	deadline := time.Now().Add(time.Duration(minutes) * time.Minute)
 	data, _ := json.Marshal(TrialStatus{Deadline: deadline.Unix()})
 	_ = store.WriteFileAtomic(a.trialPath(), data, 0o600)
+	_ = os.Remove(a.unconfirmedPath()) // 改动交给试用期管了
 	a.Log.Add("agent", "透明代理已打开：请在网页上点「保留」，否则到点自动关掉")
 	a.trialMu.Lock()
 	if a.trialTimer != nil {
@@ -58,6 +80,7 @@ func (a *App) Keep() {
 	}
 	a.trialMu.Unlock()
 	_ = os.Remove(a.trialPath())
+	_ = os.Remove(a.unconfirmedPath())
 }
 
 func (a *App) trialExpired() {
@@ -70,6 +93,7 @@ func (a *App) trialExpired() {
 
 func (a *App) disableProxy() {
 	_ = os.Remove(a.trialPath())
+	_ = os.Remove(a.unconfirmedPath())
 	_, _ = a.Settings.Update(func(cur *store.Settings) error {
 		cur.Proxy.Enabled = false
 		return nil

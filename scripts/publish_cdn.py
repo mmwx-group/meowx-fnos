@@ -6,7 +6,7 @@
 
 fnos 条目：
   {"version", "core", "releasedAt", "files": [{"kind": "fpk", "arch", "name", "url", "size", "sha256"}]}
-arch：x86_64（安装包文件名里的平台 x86）/ arm64（arm），x86_64 排前面。
+arch：x86_64（安装包文件名里的平台 x86）/ arm64（arm），x86_64 排前面。安装包名 meowx-fnos-<版本>-<x86|arm>.fpk。
 
 依赖：python3 + aws cli（GitHub 托管 runner 自带）。环境变量：R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY，
 可选 R2_BUCKET（默认 mmwx-dl）。
@@ -37,7 +37,7 @@ DIR = 'fnos'
 PLATFORM = 'fnos'
 # 安装包文件名里的平台（fnOS 的叫法）→ 清单里的架构
 ARCHES = {'x86': 'x86_64', 'arm': 'arm64'}
-NAME_RE = re.compile(r'^MeowX-(?P<version>[^-]+(?:-[^-]+)*)-fnos-(?P<platform>x86|arm)\.fpk$')
+NAME_RE = re.compile(r'^meowx-fnos-(?P<version>.+)-(?P<platform>x86|arm)\.fpk$')
 
 
 def version_key(v: str) -> tuple[int, ...]:
@@ -47,7 +47,7 @@ def version_key(v: str) -> tuple[int, ...]:
 def file_entry(path: Path, version: str) -> dict:
     m = NAME_RE.match(path.name)
     if not m:
-        raise SystemExit(f'认不出的安装包文件名：{path.name}（应为 MeowX-<版本>-fnos-<x86|arm>.fpk）')
+        raise SystemExit(f'认不出的安装包文件名：{path.name}（应为 meowx-fnos-<版本>-<x86|arm>.fpk）')
     if m['version'] != version:
         raise SystemExit(f'{path.name} 的版本与 --version {version} 不一致')
     data = path.read_bytes()

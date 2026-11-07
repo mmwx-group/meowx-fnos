@@ -152,18 +152,24 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	proxyChanged := saved.Proxy.Enabled && !reflect.DeepEqual(prev.Proxy, saved.Proxy)
 	if r.URL.Query().Get("apply") != "0" {
 		// 打开或改了透明代理：套用之前就进试用期——套用到一半失败（TUN 已经起来、旁路由规则没下发成功）时
-		// NAS 的网络可能已经被改了，到点没确认照样自动关
-		if saved.Enabled && saved.Proxy.Enabled && !reflect.DeepEqual(prev.Proxy, saved.Proxy) {
+		// NAS 的网络可能已经被改了，到点没确认照样自动关。MeowX 停着时这次不会套用，留到点「启动」时再进试用期
+		switch {
+		case proxyChanged && saved.Enabled:
 			s.App.StartTrial(saved.Proxy.KeepMinutes)
-		} else if !saved.Proxy.Enabled {
+		case proxyChanged:
+			s.App.MarkUnconfirmed()
+		case !saved.Proxy.Enabled:
 			s.App.Keep()
 		}
 		if err := s.App.Apply(r.Context()); err != nil {
 			writeJSON(w, map[string]any{"settings": s.App.Settings.Get(), "error": err.Error(), "trial": s.App.Trial()})
 			return
 		}
+	} else if proxyChanged {
+		s.App.MarkUnconfirmed()
 	}
 	writeJSON(w, map[string]any{"settings": s.App.Settings.Get(), "trial": s.App.Trial()})
 }
@@ -206,6 +212,8 @@ func (s *Server) service(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, errors.New("action 只能是 start / stop / restart"))
 		return
 	}
+	// 停着时改过透明代理：这次启动才真正套用，先进试用期
+	s.App.TrialIfUnconfirmed()
 	if err := s.App.Apply(r.Context()); err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
