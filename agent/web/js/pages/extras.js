@@ -161,7 +161,7 @@ function parseAkileKey(input) {
     return /^ak_[A-Za-z0-9_-]{8,200}$/.test(s) ? s : null;
 }
 
-const akileDesc = '把本机直连出口 IPv4 写进所选 AkileCDN 规则的入口白名单。网络变化、回到前台时立刻更新，每 10 分钟检查一次出口 IP、变了才更新。一条规则只能放一个 IP，多台设备都开会互相覆盖。';
+const akileDesc = '把 NAS 的直连出口 IPv4 写进所选 AkileCDN 规则的入口白名单。控制服务启动、打开开关、添加节点时立刻更新，每 10 分钟检查一次出口 IP、变了才更新。一条规则只能放一个 IP，多台设备都开会互相覆盖。';
 
 // 上一次的结果：已更新为 / 已是（绿）、失败原因（红）、还没更新过（灰）
 function AkileResult({ r }) {
