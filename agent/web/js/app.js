@@ -11,6 +11,7 @@ import { ProxyPage } from './pages/proxy.js';
 import { Mesh } from './pages/mesh.js';
 import { Connections } from './pages/connections.js';
 import { Logs } from './pages/logs.js';
+import { Extras } from './pages/extras.js';
 import { SettingsPage } from './pages/settings.js';
 
 const pages = [
@@ -22,6 +23,7 @@ const pages = [
     { id: 'mesh', title: '喵窝', Page: Mesh },
     { id: 'connections', title: '连接', Page: Connections },
     { id: 'logs', title: '日志', Page: Logs },
+    { id: 'extras', title: '辅助功能', Page: Extras },
     { id: 'settings', title: '设置', Page: SettingsPage },
 ];
 

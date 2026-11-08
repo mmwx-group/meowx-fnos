@@ -1884,3 +1884,77 @@ code,
         flex-basis: 100%;
     }
 }
+
+/* 辅助功能：「加白」组标题，说明收在 ⓘ 里 */
+.group {
+    margin: 4px 2px 12px;
+}
+
+.group__head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.group__title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+.group__info {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--t2);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.group__info:hover,
+.group__info.is-open {
+    background: var(--elev2);
+    color: var(--t1);
+}
+
+.group__tip {
+    margin: 6px 0 0;
+    padding: 10px 12px;
+    border-radius: var(--r-cell);
+    background: var(--elev2);
+    color: var(--t2);
+    font-size: 13px;
+}
+
+/* AkileCDN 白名单：添加按钮那一行、选节点 / 规则弹窗里的列表 */
+.akile-add {
+    align-items: center;
+    margin-top: 12px;
+}
+
+.akile-wrap {
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.akile-options {
+    max-height: 50vh;
+    margin-top: 10px;
+    overflow-y: auto;
+}
+
+/* 行里的结果：成功绿、失败红（.item__meta 定义在后面，单写 .ok-text / .error-text 压不过它的灰色） */
+.item__meta.ok-text {
+    color: var(--good);
+}
+
+.item__meta.error-text {
+    color: var(--slow);
+}

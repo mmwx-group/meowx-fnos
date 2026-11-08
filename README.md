@@ -32,7 +32,7 @@ scripts/build-fpk.sh <版本> [x86|arm]   # 产物在 dist/meowx-fnos-<版本>-<
 ```
 
 要 Go 1.27、git、curl。内核从 [meowx-core](https://github.com/mmwx-group/meowx-core) 按 `scripts/build-core.sh` 里固定的提交编译，
-打上 `patches/core/` 的补丁；喵窝用官方 tailscale 的静态程序（`scripts/fetch-tailscale.sh`，校验 sha256）。
+有补丁时打上 `patches/core/` 的补丁；喵窝用官方 tailscale 的静态程序（`scripts/fetch-tailscale.sh`，校验 sha256）。
 推 main 由 Actions 打包，打 `v*` tag 发布（tag 要与 `fnos/manifest` 的 version 一致）。
 
 设计见 [docs/design.md](docs/design.md)，控制服务的 API 见 [docs/api.md](docs/api.md)。

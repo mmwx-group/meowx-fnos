@@ -64,6 +64,25 @@ Profile：`{id, name, url?, info_url?, user_agent?, from_panel?, updated_at(秒)
 
 `POST /api/panel/ggy` `{action: status|enable|disable|add|remove|report, token?, index?}`：与主控账户无关、没登录也能用；`token` 可以是整条分享链接。
 
+## AkileCDN 白名单
+
+`POST /api/panel/akile` `{action, key?, port?, rule_id?, name?, label?, index?}`，回 `meowx-core panel akile …` 的 JSON（Key 只回脱敏写法）。
+与主控账户无关、没登录也能用；规格同各端（五端共用规格 §8）。
+
+| action | 参数 | 说明 |
+|---|---|---|
+| `status` / `enable` / `disable` | | 打开开关时当场查出口 IP、把全部节点写一次 |
+| `setkey` / `clearkey` | `key` | 合法（`ak_` 开头）才存；开着时换 Key 当场写一次 |
+| `nodes` | | 订阅里的可选节点：内核在跑读运行配置，没在跑读选中的订阅 |
+| `rules` | `port` | 用存着的 Key 查监听这个端口的规则（直接问 Akile，不改设置） |
+| `add` | `rule_id, port, name, label` | 开关开着时当场写这一个 |
+| `remove` | `index` | 删除不触发上报 |
+| `report` | | 开关开着才报 |
+
+设置存 `/data/panel/akile.json`（`MEOWX_AKILE_STATE`），每个节点上一次的结果存 `/data/panel/akile-results.json`（`MEOWX_AKILE_RESULT`，
+控制服务启动时删掉，等同 OpenWrt 版的内存盘）。定时上报（同 po0 / GGY，内核在跑时每 10 分钟）带 `--timer`：出口 IP 与上一次写入的相同就跳过；
+控制服务启动后的第一轮一定写。
+
 ## 喵窝
 
 | 方法 | 路径 | 说明 |

@@ -62,6 +62,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/panel/import", s.panelImport)
 	mux.HandleFunc("POST /api/panel/po0", s.panelPo0)
 	mux.HandleFunc("POST /api/panel/ggy", s.panelGGY)
+	mux.HandleFunc("POST /api/panel/akile", s.panelAkile)
 
 	mux.HandleFunc("GET /api/mesh", s.meshView)
 	mux.HandleFunc("PUT /api/mesh", s.meshSave)
@@ -609,6 +610,42 @@ func (s *Server) panelGGY(w http.ResponseWriter, r *http.Request) {
 	case "status", "enable", "disable", "report":
 	case "add":
 		args = append(args, body.Token)
+	case "remove":
+		args = append(args, strconv.Itoa(body.Index))
+	default:
+		writeErr(w, http.StatusBadRequest, errors.New("未知操作"))
+		return
+	}
+	s.panelRun(w, r, args...)
+}
+
+// POST /api/panel/akile {"action":"status|enable|disable|setkey|clearkey|nodes|rules|add|remove|report","key","port","rule_id","name","label","index"}
+// AkileCDN 白名单：与主控账户无关、没登录也能用。打开开关、换 Key、开着时添加由 meowx-core 当场查出口 IP 并写一次再回状态；
+// 回来的 Key 都是脱敏写法
+func (s *Server) panelAkile(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Action string `json:"action"`
+		Key    string `json:"key"`
+		Port   int    `json:"port"`
+		RuleID int64  `json:"rule_id"`
+		Name   string `json:"name"`
+		Label  string `json:"label"`
+		Index  int    `json:"index"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	args := []string{"akile", body.Action}
+	switch body.Action {
+	case "status", "enable", "disable", "clearkey", "report":
+	case "setkey":
+		args = append(args, body.Key)
+	case "nodes":
+		args = append(args, s.App.AkileNodesConfig())
+	case "rules":
+		args = append(args, strconv.Itoa(body.Port))
+	case "add":
+		args = append(args, strconv.FormatInt(body.RuleID, 10), strconv.Itoa(body.Port), body.Name, body.Label)
 	case "remove":
 		args = append(args, strconv.Itoa(body.Index))
 	default:

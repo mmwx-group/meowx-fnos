@@ -1,9 +1,9 @@
-// 订阅：本机订阅列表（添加、上传、编辑、刷新、切换、删除）、主控账户（登录、账户下的订阅、退出）、po0 加白
+// 订阅：本机订阅列表（添加、上传、编辑、刷新、切换、删除）、主控账户（登录、账户下的订阅、退出）。po0 / GGY 加白在「辅助功能」页
 import { html, useState, useEffect, useRef } from '../lib.js';
 import { get, post, patch, del, request, seg } from '../api.js';
 import { useStore, refreshProfiles, refreshPanel, refreshStatus, toast } from '../store.js';
-import { Card, Button, Field, TextInput, Switch, Dialog, Usage } from '../ui.js';
-import { profileName, stripPeriod, isDownloaded, formatBytes, relativeTime } from '../util.js';
+import { Card, Button, Field, TextInput, Dialog, Usage } from '../ui.js';
+import { profileName, stripPeriod, isDownloaded, formatBytes } from '../util.js';
 
 // 刷新一份订阅并按结果提示：下载 / 校验没过（旧的保留）、下载成功但套用失败（运行中的保持不动）、更新成功，分开说
 export async function refreshProfile(id) {
@@ -293,150 +293,6 @@ function AccountCard() {
     <//>`;
 }
 
-// po0 加白卡（同客户端「流量控制 → po0 加白」+「自定义 po0 服务器」）：每次操作后用回包原地重画；token 只显示脱敏写法
-function Po0Card() {
-    const { panel } = useStore();
-    const [st, setSt] = useState(null);
-    const [error, setError] = useState('');
-    const [address, setAddress] = useState('');
-    const [token, setToken] = useState('');
-    const [bad, setBad] = useState({});
-    const act = async (body) => {
-        setError('');
-        try {
-            setSt(await post('/panel/po0', body));
-        } catch (err) {
-            setError(stripPeriod(err.message) || '操作失败');
-        }
-    };
-    useEffect(() => { act({ action: 'status' }); }, []);
-    if (!st) {
-        return html`<${Card} title="po0 加白">${error ? html`<p class="error-text">${error}</p>` : html`<p class="muted">正在载入…</p>`}<//>`;
-    }
-    const add = async () => {
-        const a = address.trim(), t = token.trim();
-        const badToken = !/^pgnfw_[A-Za-z0-9_-]{4,200}(@[0-9]{1,2})?$/.test(t);
-        setBad({ address: !a, token: badToken });
-        if (!a) {
-            setError('请填写 po0 的加白服务器地址');
-            return;
-        }
-        if (badToken) {
-            setError('token 不对：应为 pgnfw_ 开头的那一整串，可带 @槽位');
-            return;
-        }
-        await act({ action: 'add', address: a, token: t });
-        setAddress('');
-        setToken('');
-    };
-    const toggle = html`<${Switch} label="po0 加白" checked=${st.enabled} onChange=${(on) => act({ action: on ? 'enable' : 'disable' })} />`;
-    const panelList = st.panel ?? [];
-    const custom = st.custom ?? [];
-    return html`<${Card} title="po0 加白" actions=${toggle}
-        desc="把 NAS 的出口 IP 上报到 po0 的加白服务器（主控登记的与自己添加的），内核运行时每 10 分钟自动加白；访问这些 po0 的流量一律直连。">
-        ${st.enabled && html`
-            <div class="section-title">主控登记（${panelList.length}）</div>
-            ${!panel?.logged_in
-                ? html`<p class="hint">登录主控账户后自动获取。</p>`
-                : panelList.length == 0
-                    ? html`<p class="hint">这个账户下没有 po0 服务器。</p>`
-                    : html`<div class="list">${panelList.map((s) => html`<div class="item"><div class="item__main">
-                        <div class="item__mono">${s.name || s.host}</div>
-                        ${s.name && html`<div class="item__meta mono">${s.host}</div>`}
-                    </div></div>`)}</div>`}`}
-        <div class="section-title">自定义 po0 服务器（${custom.length}）</div>
-        ${custom.length > 0 && html`<div class="list">${custom.map((s, i) => html`<div class="item">
-            <div class="item__main">
-                <div class="item__mono">${s.address}</div>
-                <div class="item__meta mono">${s.token}</div>
-            </div>
-            <${Button} small kind="danger" onClick=${() => act({ action: 'remove', index: i })}>删除<//>
-        </div>`)}</div>`}
-        ${!st.enabled && custom.length > 0 && html`<p class="hint">「po0 加白」关着，这些服务器暂时不上报。</p>`}
-        <form class="inline wrap" onSubmit=${(e) => e.preventDefault()}>
-            <input class=${'input is-full' + (bad.address ? ' is-invalid' : '')} placeholder="加白服务器地址：IP 或域名，可带端口" spellcheck="false" autocomplete="off"
-                value=${address} onInput=${(e) => setAddress(e.currentTarget.value)} />
-            <input class=${'input' + (bad.token ? ' is-invalid' : '')} type="password" placeholder="token，pgnfw_ 开头（可带 @槽位）" autocomplete="new-password"
-                value=${token} onInput=${(e) => setToken(e.currentTarget.value)} />
-            <${Button} kind="primary" onClick=${add}>添加<//>
-        </form>
-        ${error && html`<p class="error-text">${error}</p>`}
-        <p class="hint">地址填 po0 的加白服务器地址（IP 或域名，可带端口，如 1.2.3.4 或 fw.example.com:8443），不一定是节点地址；token 在 po0 后台复制。</p>
-    <//>`;
-}
-
-// GGY 的输入框接受裸 token 或整条分享链接（带 ? 的当链接，取查询串里 token 的值）；合法 = A–Z a–z 0–9 _ -，8–200 位（同 meowx-core）
-function parseGgyToken(input) {
-    let s = String(input ?? '').trim();
-    const q = s.indexOf('?');
-    if (q >= 0) {
-        s = (new URLSearchParams(s.slice(q + 1).split('#')[0]).get('token') ?? '').trim();
-    }
-    return /^[A-Za-z0-9_-]{8,200}$/.test(s) ? s : null;
-}
-
-// GGY 加白卡（同客户端「GGY 加白」，紧跟 po0 加白卡）：开关 + token 列表（脱敏写法 + 上一次的结果）
-function GgyCard() {
-    const [st, setSt] = useState(null);
-    const [error, setError] = useState('');
-    const [token, setToken] = useState('');
-    const [bad, setBad] = useState(false);
-    const act = async (body) => {
-        setError('');
-        try {
-            setSt(await post('/panel/ggy', body));
-        } catch (err) {
-            setError(stripPeriod(err.message) || '操作失败');
-        }
-    };
-    useEffect(() => { act({ action: 'status' }); }, []);
-    if (!st) {
-        return html`<${Card} title="GGY 加白">${error ? html`<p class="error-text">${error}</p>` : html`<p class="muted">正在载入…</p>`}<//>`;
-    }
-    const add = async () => {
-        const t = parseGgyToken(token);
-        setBad(!t);
-        if (!t) {
-            setError(token.trim() ? 'token 格式不对' : '请填写 token');
-            return;
-        }
-        await act({ action: 'add', token: t });
-        setToken('');
-    };
-    // 上一次的结果：成功 / 失败原因 / 还没报过
-    const result = (r) => {
-        if (!r) {
-            return html`<div class="item__meta">还没报过</div>`;
-        }
-        const when = +r.at > 0 ? ' · ' + relativeTime(r.at) : '';
-        return r.ok
-            ? html`<div class="item__meta ok-text">成功${when}</div>`
-            : html`<div class="item__meta error-text" title=${r.error || ''}>失败：${r.error || '操作失败'}${when}</div>`;
-    };
-    const tokens = st.tokens ?? [];
-    const toggle = html`<${Switch} label="GGY 加白" checked=${st.enabled} onChange=${(on) => act({ action: on ? 'enable' : 'disable' })} />`;
-    return html`<${Card} title="GGY 加白" actions=${toggle}
-        desc="把 NAS 的出口 IP 上报到 GGY（咕咕云）服务器的防火墙白名单：填分享链接里的 token（也可以直接粘贴整条链接），每 10 分钟自动加白；上报走直连。">
-        <div class="section-title">token（${tokens.length}）</div>
-        ${tokens.length > 0 && html`<div class="list">${tokens.map((item, i) => html`<div class="item">
-            <div class="item__main">
-                <div class="item__mono">${item.token}</div>
-                ${result(item.result)}
-            </div>
-            <${Button} small kind="danger" onClick=${() => act({ action: 'remove', index: i })}>删除<//>
-        </div>`)}</div>`}
-        ${tokens.some((item) => item.result?.invalid) && html`<p class="hint">有 token 无效或已失效：请到 GGY 重新生成分享链接，添加新的 token 后删掉旧的。</p>`}
-        ${!st.enabled && tokens.length > 0 && html`<p class="hint">「GGY 加白」开关关着，添加的 token 暂不上报。</p>`}
-        <form class="inline" onSubmit=${(e) => e.preventDefault()}>
-            <input class=${'input' + (bad ? ' is-invalid' : '')} type="password" placeholder="token，也可以粘贴整条分享链接" autocomplete="new-password"
-                value=${token} onInput=${(e) => setToken(e.currentTarget.value)}
-                onKeyDown=${(e) => { if (e.key == 'Enter') { e.preventDefault(); e.currentTarget.nextElementSibling?.click(); } }} />
-            <${Button} kind="primary" onClick=${add}>添加<//>
-        </form>
-        ${error && html`<p class="error-text">${error}</p>`}
-    <//>`;
-}
-
 export function Profiles({ active }) {
     const { profiles: data } = useStore();
     useEffect(() => {
@@ -456,9 +312,6 @@ export function Profiles({ active }) {
             <${QuickAdd} />
             <div class="inline"><${UploadButton} /></div>
         <//>
-        <div class="grid-2">
-            <div><${AccountCard} /></div>
-            <div><${Po0Card} /><${GgyCard} /></div>
-        </div>
+        <${AccountCard} />
     </div>`;
 }

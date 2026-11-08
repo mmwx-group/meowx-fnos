@@ -7,7 +7,7 @@
 
 - **不用 meowC Linux 版**：那是 Flutter 桌面程序，要有桌面环境；NAS 没有屏幕、用浏览器管理。
 - **以 OpenWrt 版为基础**：同类设备（无屏、浏览器管理、给局域网代理、用官方 tailscale 把局域网开放进喵窝），
-  内核同一份 meowx-core（独立程序模式自己起监听端口与 TUN，`meowx-core panel …` 子命令管主控账户 / 账户订阅 / po0 / GGY / 喵窝）。
+  内核同一份 meowx-core（独立程序模式自己起监听端口与 TUN，`meowx-core panel …` 子命令管主控账户 / 账户订阅 / po0 / GGY / AkileCDN / 喵窝）。
   要重写的是飞牛这边的外壳：LuCI → 自己的网页界面，procd / UCI / ucode → 一个 Go 控制服务，opkg → fpk。
 
 ## 2. 飞牛的约束（2026-11-07 在测试机 fnOS 1.2.1000 上实测）
@@ -52,7 +52,7 @@ fpk
 |---|---|---|
 | 设置存储 | UCI `/etc/config/meowx` | `/data/settings.json`（agent 管，字段照 `meowx.conf` 精简） |
 | 订阅（导入 / 更新 / 切换） | `meowx.init` + `profile.js` | agent：下载到 `/data/profiles/`，按间隔自动更新 |
-| 主控账户 / 账户订阅 / po0 / GGY | `meowx-core panel …` + `app.js` / `extras.js` | 同样调 `meowx-core panel …`（状态文件放 `/data/panel`） |
+| 主控账户 / 账户订阅 / po0 / GGY / AkileCDN | `meowx-core panel …` + `app.js` / `extras.js` | 同样调 `meowx-core panel …`（状态文件放 `/data/panel`） |
 | 运行配置（混入端口、DNS、TUN、嗅探、外部控制） | `mixin.uc` / `meowx.init` | agent 生成 `/data/run/config.yaml` |
 | 透明代理（NAS 本机 + 旁路由） | `hijack.ut`（nftables + 策略路由） | 见 §5 |
 | 喵窝 | `mesh_cli.uc` + 官方 tailscale | agent 移植 `mesh_cli.uc`，tailscaled 在容器里用内核网卡 |

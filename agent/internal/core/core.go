@@ -27,6 +27,13 @@ type Paths struct {
 
 func (p Paths) ConfigPath() string { return filepath.Join(p.HomeDir, "config.yaml") }
 
+// AkileResultPath：AkileCDN 白名单每个节点上一次的结果（OpenWrt 版放内存盘 /var/run/meowx/akile.json）。
+// 控制服务启动时删掉，等同内存盘：重启后显示「还没更新过」、第一轮一定写
+func (p Paths) AkileResultPath() string { return filepath.Join(p.Panel, "akile-results.json") }
+
+// AkileStatePath：AkileCDN 白名单的设置（开关、API Key、节点列表；OpenWrt 版存 uci）
+func (p Paths) AkileStatePath() string { return filepath.Join(p.Panel, "akile.json") }
+
 // PanelEnv：panel 子命令的状态文件指到数据卷（OpenWrt 版在 /etc/meowx）
 func (p Paths) PanelEnv() []string {
 	return []string{
@@ -34,8 +41,10 @@ func (p Paths) PanelEnv() []string {
 		"MEOWX_PO0_STATE=" + filepath.Join(p.Panel, "po0.json"),
 		"MEOWX_GGY_RESULTS=" + filepath.Join(p.Panel, "ggy-results.json"),
 		"MEOWX_APP_LOG=" + filepath.Join(p.Panel, "app.log"),
-		"MEOWX_GGY_STATE=" + filepath.Join(p.Panel, "ggy.json"), // 补丁 005：没有 uci，GGY 设置存文件
-		"MEOWX_MESH_OS=fnos", // 补丁 004：喵窝入网时报给主控的系统 / 客户端
+		"MEOWX_GGY_STATE=" + filepath.Join(p.Panel, "ggy.json"), // 没有 uci，GGY 设置存文件
+		"MEOWX_AKILE_STATE=" + p.AkileStatePath(),               // AkileCDN 白名单同样存文件
+		"MEOWX_AKILE_RESULT=" + p.AkileResultPath(),
+		"MEOWX_MESH_OS=fnos", // 喵窝入网时报给主控的系统 / 客户端
 		"MEOWX_MESH_CLIENT=meowx-fnos",
 	}
 }

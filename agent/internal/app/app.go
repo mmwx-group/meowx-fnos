@@ -68,6 +68,8 @@ func New(version, dataDir, coreBinary, tsBinDir, uiPath string) (*App, error) {
 	}
 	_ = os.MkdirAll(a.Core.Paths.HomeDir, 0o755)
 	seedGeo(a.Core.Paths.HomeDir, log)
+	// AkileCDN 白名单上一次的结果只留到控制服务重启（同 OpenWrt 版的内存盘）：重启后第一轮一定写
+	_ = os.Remove(a.Core.Paths.AkileResultPath())
 	a.Mesh = &mesh.Manager{
 		Dir: filepath.Join(dataDir, "mesh"), Bin: tsBinDir, Core: a.Core, Log: log, Settings: settings,
 		// 主控 / 中继域名变了：内核在跑就重载，把它们加进 fake-ip-filter（tailscaled 才拿得到真实地址）
@@ -250,7 +252,7 @@ func (a *App) Loop(ctx context.Context) {
 			a.autoUpdate(ctx, now)
 			if a.reportDue(now, lastReport) {
 				lastReport = now
-				a.panelReport(ctx)
+				a.panelReport(ctx, true)
 			}
 		}
 	}
@@ -271,13 +273,13 @@ func (a *App) autoUpdate(ctx context.Context, now time.Time) {
 	}
 }
 
-// 白名单上报间隔同客户端：有 po0 或 GGY 加白时每 10 分钟，只有主控账户时每小时；内核没在跑不报
+// 白名单上报间隔同客户端：有 po0、GGY 或 AkileCDN 加白时每 10 分钟，只有主控账户时每小时；内核没在跑不报
 func (a *App) reportDue(now, last time.Time) bool {
 	if !a.Core.Status().Running {
 		return false
 	}
 	interval := time.Hour
-	if len(a.po0ReportURLs()) > 0 || a.ggyActive() {
+	if len(a.po0ReportURLs()) > 0 || a.ggyActive() || a.akileActive() {
 		interval = 10 * time.Minute
 	} else if _, err := os.Stat(filepath.Join(a.Core.Paths.Panel, "panel.json")); err != nil {
 		return false
@@ -298,10 +300,50 @@ func (a *App) ggyActive() bool {
 	return json.Unmarshal(data, &st) == nil && st.Enabled && len(st.Tokens) > 0
 }
 
-func (a *App) panelReport(ctx context.Context) {
+// AkileCDN 白名单开着、有 API Key、至少一个节点（与主控账户无关，没登录也报）
+func (a *App) akileActive() bool {
+	data, err := os.ReadFile(a.Core.Paths.AkileStatePath())
+	if err != nil {
+		return false
+	}
+	var st struct {
+		Enabled bool              `json:"enabled"`
+		Key     string            `json:"key"`
+		Nodes   []json.RawMessage `json:"nodes"`
+	}
+	return json.Unmarshal(data, &st) == nil && st.Enabled && st.Key != "" && len(st.Nodes) > 0
+}
+
+// AkileNodesConfig：「从订阅添加节点」读哪份配置——内核在跑就是运行配置（实际在用的），没在跑就是选中的订阅（下次启动用的）
+func (a *App) AkileNodesConfig() string {
+	run := a.Core.Paths.ConfigPath()
+	if a.Core.Status().Running {
+		if _, err := os.Stat(run); err == nil {
+			return run
+		}
+	}
+	if id := a.Settings.Get().Profile; id != "" {
+		if _, ok := a.Profiles.Get(id); ok {
+			return a.Profiles.Path(id)
+		}
+	}
+	return run
+}
+
+// timer = 定时那一轮：AkileCDN 只在出口 IP 变了时才写（一条规则只放一个 IP，多台设备都开时别每 10 分钟互相覆盖）
+func (a *App) panelReport(ctx context.Context, timer bool) {
 	before := fmt.Sprint(a.po0ReportURLs())
 	if _, err := a.Core.Panel(ctx, "report"); err != nil {
 		a.Log.Add("agent", "白名单上报失败："+err.Error())
+	}
+	if a.akileActive() {
+		args := []string{"akile", "report"}
+		if timer {
+			args = append(args, "--timer")
+		}
+		if _, err := a.Core.Panel(ctx, args...); err != nil {
+			a.Log.Add("agent", "AkileCDN 白名单上报失败："+err.Error())
+		}
 	}
 	// 主控下发的 po0 列表变了：重载让直连规则跟上
 	if fmt.Sprint(a.po0ReportURLs()) != before {
