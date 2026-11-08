@@ -11,6 +11,8 @@ export const state = {
     toasts: [],
     trial: null,       // 透明代理试用：{ pending, deadline(秒) }，到点没点「保留设置」自动关
     dirty: new Set(),  // 有没保存修改的页签
+    release: null,     // GET /api/update：有没有新版本
+    upgrading: null,   // 一键更新已提交：{ version, at(毫秒) }，控制服务的版本号变成它就刷新页面
 };
 
 const listeners = new Set();
@@ -51,6 +53,16 @@ export async function refreshProfiles() {
     const res = await get('/profiles');
     update({ profiles: { profiles: res?.profiles ?? [], active: res?.active ?? '' } });
     return state.profiles;
+}
+
+// 检查新版本（控制服务缓存一小时，force = 重新取）
+export async function refreshRelease(force = false) {
+    try {
+        update({ release: await get('/update' + (force ? '?refresh=1' : '')) });
+    } catch (err) {
+        update({ release: { error: err.message } });
+    }
+    return state.release;
 }
 
 export async function refreshPanel() {

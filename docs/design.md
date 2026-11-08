@@ -23,6 +23,12 @@
 - fpk = tar.gz：`app.tgz`（应用目录，装到 `/vol<N>/@appcenter/meowx`，即 `TRIM_APPDEST`）+ `manifest` + `cmd/` + `config/` + `ui/` + 图标 + 端口说明 `meowx.sc`。
   数据目录 `TRIM_PKGVAR` = `/vol<N>/@appdata/meowx`，挂进容器 `/data`。安装：`appcenter-cli install-fpk <fpk> -v <卷号>`（root）。
 - 平台 `platform = x86 | arm`，不能写多个值：x86 与 arm 各出一个包。
+- **一键更新**（0.1.1 起）：appcenter-cli 没有保留数据的升级（`install-fpk` 拒绝已装的应用，`install-local` 是先卸载再装）。
+  应用中心守护程序的 HTTP 接口（`/run/com.trim.app.center.sock`，属主 root、ACL 只给 `OfficialAppUsers` 组，`/rpc/v1` 下不要会话 token）
+  有正经的升级：`download/task` 暂存安装包（按宿主路径读）→ `update/info` 取所在卷 → `update/task`，保留 `@appdata`、失败回滚。
+  compose 把这个 socket 挂进容器（容器里 uid 0 能连），并用 `MEOWX_HOST_DATA` 告诉控制服务数据目录在宿主上的路径。
+  2026-11-08 在测试机上实测 0.1.1 → 0.1.2：约 21 秒换好重启，数据目录里的文件原样保留。接口与字段对照社群商店 conversun/fnos-store 的实测记录。
+  守护程序暂存的解包留在 `/vol1/appcenter-downloads/<应用>-<版本>-tpk`（网页手动安装同样留），容器里碰不到、不清。
 
 ## 3. 组成
 

@@ -1,7 +1,7 @@
 // 外框：顶栏、页签（地址里的 #锚点 记当前页，后退键与刷新都停在原页）、登录框、全局横条
 import { html, render, useState, useEffect, useRef, useLayoutEffect } from './lib.js';
 import { setUnauthorizedHandler, post } from './api.js';
-import { useStore, update, refreshStatus, refreshProfiles, refreshPanel, login, toast } from './store.js';
+import { useStore, update, refreshStatus, refreshProfiles, refreshPanel, refreshRelease, login, toast } from './store.js';
 import { Button, Toasts, StatusPill, Logo } from './ui.js';
 import { Overview } from './pages/overview.js';
 import { Profiles } from './pages/profiles.js';
@@ -178,8 +178,17 @@ function App() {
         if (ready) {
             refreshProfiles().catch(() => { });
             refreshPanel();
+            refreshRelease();
         }
     }, [ready]);
+
+    // 一键更新后应用中心会重启 MeowX：控制服务的版本号变成新版就刷新页面，换上新版的网页
+    const version = store.status?.version;
+    useEffect(() => {
+        if (store.upgrading && version == store.upgrading.version) {
+            location.reload();
+        }
+    }, [version, store.upgrading]);
 
     if (store.needLogin) {
         return html`<${LoginScreen} /><${Toasts} />`;
@@ -193,7 +202,8 @@ function App() {
             <${Logo} />
             <div>
                 <div class="top__title">MeowX</div>
-                <div class="top__sub">飞牛 NAS 版${store.status.version ? ' · ' + store.status.version : ''}</div>
+                <div class="top__sub">飞牛 NAS 版${store.status.version ? ' · ' + store.status.version : ''}${store.release?.has_update
+            && html` · <a href="#settings">有新版本 ${store.release.latest}</a>`}</div>
             </div>
             <div class="top__status"><${StatusPill} status=${store.status} /></div>
         </header>

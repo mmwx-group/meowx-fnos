@@ -18,6 +18,7 @@ import (
 	"github.com/mmwx-group/meowx-fnos/agent/internal/mesh"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/runcfg"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/update"
 )
 
 type App struct {
@@ -29,6 +30,7 @@ type App struct {
 	Core     *core.Supervisor
 	Log      *core.Ring
 	Mesh     *mesh.Manager
+	Update   *update.Updater
 
 	applyMu   sync.Mutex
 	lastError string

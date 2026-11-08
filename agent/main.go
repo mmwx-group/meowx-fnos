@@ -15,6 +15,7 @@ import (
 	"github.com/mmwx-group/meowx-fnos/agent/internal/api"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/app"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/update"
 )
 
 var version = "dev"
@@ -36,6 +37,16 @@ func main() {
 		log.Fatal(err)
 	}
 	a.Log.Add("agent", "MeowX "+version+" 启动")
+	// 检查更新 + 一键更新：MEOWX_HOST_DATA（数据目录在宿主上的路径）与应用中心的 socket 由 docker-compose 给
+	a.Update = &update.Updater{
+		Version: version, DataDir: a.DataDir,
+		FeedURL:     os.Getenv("MEOWX_UPDATE_FEED"), // 只给测试用，缺省是 dl.miaomiaowux.com 的发布清单
+		Socket:      envOr("MEOWX_APPCENTER_SOCK", update.DefaultSocket),
+		HostDataDir: os.Getenv("MEOWX_HOST_DATA"),
+		Client:      &http.Client{Timeout: 15 * time.Minute},
+		Log:         func(s string) { a.Log.Add("agent", s) },
+	}
+	a.Update.Cleanup()
 	a.RecoverTrial()
 	a.TrialIfUnconfirmed() // 停着时改过透明代理、之后才开起来的（如改完就重启了容器）：这次启动先进试用期
 	hijack.CleanupLAN()    // 上次崩溃留下的规则

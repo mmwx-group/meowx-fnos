@@ -40,6 +40,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/proxy/keep", s.proxyKeep)
 	mux.HandleFunc("GET /api/host", s.host)
 	mux.HandleFunc("GET /api/runconfig", s.runConfig)
+	mux.HandleFunc("GET /api/update", s.updateCheck)
+	mux.HandleFunc("POST /api/update", s.updateInstall)
 	mux.HandleFunc("GET /api/logs", s.logs)
 	mux.HandleFunc("DELETE /api/logs", s.clearLogs)
 
@@ -404,6 +406,28 @@ func (s *Server) switchTo(ctx context.Context, id string) error {
 func (s *Server) profileContent(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/yaml; charset=utf-8")
 	http.ServeFile(w, r, s.App.Profiles.Path(r.PathValue("id")))
+}
+
+// ---------- 检查更新 / 一键更新 ----------
+
+// GET /api/update[?refresh=1]：有没有新版本、能不能一键更新（结果缓存一小时）
+func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	writeJSON(w, s.App.Update.Check(ctx, r.URL.Query().Get("refresh") == "1"))
+}
+
+// POST /api/update：下载新版安装包、交给飞牛应用中心升级；回包之后应用中心会重启 MeowX。
+// 关掉网页不打断下载（不跟请求的 context）
+func (s *Server) updateInstall(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
+	defer cancel()
+	v, err := s.App.Update.Install(ctx)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "version": v})
 }
 
 // ---------- 主控账户 ----------

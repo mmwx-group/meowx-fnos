@@ -17,8 +17,12 @@ services:
     environment:
       - MEOWX_UI_PORT=7899
       - TZ=Asia/Shanghai
+      # 一键更新：应用中心按宿主路径读下载好的安装包
+      - MEOWX_HOST_DATA=${TRIM_PKGVAR:?}/data
     volumes:
       - ${TRIM_PKGVAR:?}/data:/data
+      # 飞牛应用中心的接口（只有 root 与官方应用组能连）：一键更新经它原地升级，同网页「手动安装」
+      - /run/com.trim.app.center.sock:/run/fnos-appcenter.sock
       - /etc/ssl/certs:/etc/ssl/certs:ro   # 用宿主的 CA 证书（随飞牛系统更新），镜像里不另带
       - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
     restart: unless-stopped
