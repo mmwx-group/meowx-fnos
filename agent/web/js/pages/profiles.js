@@ -140,12 +140,16 @@ function ProfileRow({ p, active }) {
         }
     };
     const remove = async () => {
-        if (!confirm(`删除订阅「${profileName(p)}」？`)) {
+        const ask = active
+            ? `「${profileName(p)}」正在使用，删除后代理会停止。确定删除？`
+            : `删除订阅「${profileName(p)}」？`;
+        if (!confirm(ask)) {
             return;
         }
         await del(`/profiles/${seg(p.id)}`);
         toast('已删除');
         await refreshProfiles();
+        refreshStatus();
     };
     return html`<div class=${'item can-wrap' + (active ? ' is-current' : '')}>
         <div class="item__main">
@@ -161,7 +165,7 @@ function ProfileRow({ p, active }) {
         <div class="item__actions">
             ${!active && html`<${Button} small kind="primary" onClick=${use}>使用<//>`}
             <${Button} small kind="on-card" onClick=${() => setEditing(true)}>编辑<//>
-            ${!active && html`<${Button} small kind="danger" onClick=${remove}>删除<//>`}
+            <${Button} small kind="danger" onClick=${remove}>删除<//>
         </div>
         ${editing && html`<${EditDialog} profile=${p} onClose=${() => setEditing(false)} />`}
     </div>`;

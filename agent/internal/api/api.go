@@ -331,15 +331,20 @@ func (s *Server) editProfile(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"profile": p})
 }
 
+// 正在用的也能删：删掉后停内核（同退出登录删掉在用的主控订阅）。以前回 409、网页上也不给删除按钮，
+// 只有一份订阅时就删不掉（#1718）
 func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	if s.App.Settings.Get().Profile == id {
-		writeErr(w, http.StatusConflict, errors.New("正在用的订阅不能删，先切到别的"))
-		return
-	}
 	if err := s.App.Profiles.Delete(id); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
+	}
+	if s.App.Settings.Get().Profile == id {
+		_, _ = s.App.Settings.Update(func(cur *store.Settings) error {
+			cur.Profile, cur.Enabled = "", false
+			return nil
+		})
+		_ = s.App.Apply(r.Context())
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }

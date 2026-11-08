@@ -38,7 +38,7 @@
 | POST | `/api/profiles` | `{url, name?, use?}` 添加并下载；`use` 或还没有在用的就切过去。回 `{profile, error?}` |
 | POST | `/api/profiles/upload?name=&use=1` | 正文是配置文件原文（YAML） |
 | PATCH | `/api/profiles/{id}` | `{name?, url?, info_url?, user_agent?}` |
-| DELETE | `/api/profiles/{id}` | 在用的不能删（409） |
+| DELETE | `/api/profiles/{id}` | 删的是在用的那份时停内核（同退出登录） |
 | POST | `/api/profiles/{id}/update` | 重新下载；在用且在跑时重载。回 `{profile, error?}`（失败时旧副本保留，`profile.error` 也有原因） |
 | POST | `/api/profiles/{id}/use` | 切过去（没开的顺手开）；起不来就退回原来的选择 |
 | GET | `/api/profiles/{id}/content` | 订阅原文 |
