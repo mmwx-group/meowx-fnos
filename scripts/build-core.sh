@@ -8,7 +8,7 @@ set -euo pipefail
 GOARCH="${1:?amd64 | arm64}"
 OUT="${2:?输出路径}"
 CORE_REPO="https://github.com/mmwx-group/meowx-core.git"
-CORE_REF="${CORE_REF:-bca53bd}"
+CORE_REF="${CORE_REF:-502c8b4}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${MEOWX_CACHE:-$ROOT/.cache}/meowx-core"
 

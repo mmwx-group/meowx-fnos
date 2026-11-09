@@ -6,6 +6,7 @@ import { Button, Toasts, StatusPill, Logo } from './ui.js';
 import { Overview } from './pages/overview.js';
 import { Profiles } from './pages/profiles.js';
 import { Nodes } from './pages/nodes.js';
+import { SpeedTest } from './pages/speedtest.js';
 import { Mixin } from './pages/mixin.js';
 import { ProxyPage } from './pages/proxy.js';
 import { Mesh } from './pages/mesh.js';
@@ -18,6 +19,7 @@ const pages = [
     { id: 'overview', title: '概览', Page: Overview },
     { id: 'profiles', title: '订阅', Page: Profiles },
     { id: 'nodes', title: '节点', Page: Nodes },
+    { id: 'speedtest', title: '测速', Page: SpeedTest },
     { id: 'mixin', title: '混入设置', Page: Mixin },
     { id: 'proxy', title: '透明代理', Page: ProxyPage },
     { id: 'mesh', title: '喵窝', Page: Mesh },

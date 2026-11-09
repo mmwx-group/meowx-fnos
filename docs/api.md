@@ -17,6 +17,9 @@
 | GET | `/api/runconfig` | 当前在跑的运行配置（YAML 文本，只读看） |
 | GET | `/api/logs?after=<序号>&source=core\|agent` | 日志增量：`[{seq, time(ms), source, text}]`，界面每 2 秒拿一次 `after=上次最大 seq` |
 | DELETE | `/api/logs` | 清空 |
+| GET | `/api/speedtest/history` | 网络测速记录 `{records: [...]}`（新的在前，最多 50 条；每条的内容由网页定）。测速本身经 `/api/core/meowx/speedtest`（内核的测速接口：GET 进度、POST `start` / `stop`）|
+| POST | `/api/speedtest/history` | 记一条（JSON 对象，至多 4KB），回全部记录 |
+| DELETE | `/api/speedtest/history` | 清空测速记录 |
 | GET | `/api/update[?refresh=1]` | 检查新版本（`dl.miaomiaowux.com/meowx/latest.json` 的 `platforms.fnos`，缓存一小时）：`{current, latest, has_update, released_at, notes_url, download_url, size, can_install, reason, updating, last_error, error, checked_at}`；`can_install` 为假时 `reason` 说原因、界面给 `download_url` 让用户手动安装 |
 | POST | `/api/update` | 一键更新：下载新版安装包、校验 sha256、交给飞牛应用中心升级（`/rpc/v1` 的暂存 + update 任务），回 `{ok, version}`；之后应用中心停掉 MeowX、换上新版再启动，界面看 `/api/status` 的 `version` 变了就刷新 |
 

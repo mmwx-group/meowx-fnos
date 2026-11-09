@@ -42,6 +42,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/runconfig", s.runConfig)
 	mux.HandleFunc("GET /api/update", s.updateCheck)
 	mux.HandleFunc("POST /api/update", s.updateInstall)
+	mux.HandleFunc("GET /api/speedtest/history", s.speedHistory)
+	mux.HandleFunc("POST /api/speedtest/history", s.speedHistoryAdd)
+	mux.HandleFunc("DELETE /api/speedtest/history", s.speedHistoryClear)
 	mux.HandleFunc("GET /api/logs", s.logs)
 	mux.HandleFunc("DELETE /api/logs", s.clearLogs)
 
@@ -738,4 +741,32 @@ func writeErr(w http.ResponseWriter, code int, err error) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]any{"error": err.Error()})
+}
+
+// ---------- 网络测速记录（测速本身经 /api/core/meowx/speedtest 走内核） ----------
+
+func (s *Server) speedHistory(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"records": s.App.Speed.List()})
+}
+
+// POST /api/speedtest/history {记录}：网页测完 / 失败时记一条，回全部记录
+func (s *Server) speedHistoryAdd(w http.ResponseWriter, r *http.Request) {
+	var record json.RawMessage
+	if !readJSON(w, r, &record) {
+		return
+	}
+	list, err := s.App.Speed.Add(record)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, map[string]any{"records": list})
+}
+
+func (s *Server) speedHistoryClear(w http.ResponseWriter, r *http.Request) {
+	if err := s.App.Speed.Clear(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true})
 }

@@ -1958,3 +1958,260 @@ code,
 .item__meta.error-text {
     color: var(--slow);
 }
+
+/* ---------- 网络测速 ---------- */
+
+.speed {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0 16px;
+    align-items: stretch;
+}
+
+.speed__left,
+.speed__right {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.speed__left > .btn {
+    width: 100%;
+    min-height: 50px;
+    font-size: 16px;
+    margin-bottom: 16px;
+}
+
+.speed__dial,
+.speed__panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+
+.speed-node {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.speed-node__label,
+.speed__label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--t2);
+    white-space: nowrap;
+}
+
+.speed__label {
+    margin: 4px 0 8px;
+}
+
+.speed__label + .seg {
+    margin-bottom: 12px;
+}
+
+.speed-node .select {
+    flex: 1;
+    min-width: 0;
+}
+
+.speed-gauge {
+    width: 100%;
+    max-width: 340px;
+    max-height: 300px;
+    margin: 8px auto 0;
+    flex: 1;
+}
+
+.speed-gauge__track,
+.speed-gauge__fill {
+    fill: none;
+    stroke-width: 18;
+    stroke-linecap: round;
+}
+
+.speed-gauge__track {
+    stroke: var(--elev2);
+}
+
+.speed-gauge__fill.is-down {
+    stroke: #8B6CC9;
+}
+
+.speed-gauge__fill.is-up {
+    stroke: var(--rose);
+}
+
+.speed-gauge text {
+    text-anchor: middle;
+    dominant-baseline: middle;
+    fill: var(--t2);
+}
+
+.speed-gauge__tick {
+    font-size: 13px;
+}
+
+.speed-gauge__num {
+    font-size: 52px;
+    font-weight: 800;
+    fill: var(--t1) !important;
+    font-variant-numeric: tabular-nums;
+}
+
+.speed-gauge__unit {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.speed-gauge__phase {
+    font-size: 15px;
+    font-weight: 700;
+    fill: var(--t1) !important;
+}
+
+.speed__exit {
+    text-align: center;
+    font-size: 12px;
+    color: var(--t2);
+}
+
+.speed-tiles {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.speed-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 12px 6px;
+    border-radius: var(--r-cell);
+    background: var(--elev2);
+    min-width: 0;
+}
+
+.speed-tile__label,
+.speed-tile__peak {
+    font-size: 12px;
+    color: var(--t2);
+}
+
+.speed-tile__value {
+    font-size: 22px;
+    font-weight: 800;
+    color: var(--t1);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.speed-tile__value small {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--t2);
+}
+
+.speed-tile.is-down .speed-tile__value {
+    color: #7A58BF;
+}
+
+.speed-tile.is-up .speed-tile__value {
+    color: var(--rose);
+}
+
+.speed-chart {
+    position: relative;
+    flex: 1;
+    min-height: 140px;
+    margin: 14px 0 8px;
+    border-bottom: 1px solid var(--stroke);
+}
+
+.speed-chart svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+.speed-chart polyline {
+    fill: none;
+    stroke-width: 2.5;
+    vector-effect: non-scaling-stroke;
+    stroke-linejoin: round;
+}
+
+.speed-chart__down {
+    stroke: #8B6CC9;
+}
+
+.speed-chart__up {
+    stroke: var(--rose);
+}
+
+.speed-chart__max {
+    position: absolute;
+    top: 0;
+    left: 0;
+    font-size: 11px;
+    color: var(--t2);
+}
+
+.speed-chart.is-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    color: var(--t2);
+    font-size: 12px;
+    text-align: center;
+}
+
+.speed-chart.is-empty b {
+    color: var(--t1);
+    font-size: 14px;
+}
+
+.speed__info {
+    min-height: 18px;
+    font-size: 12px;
+    color: var(--t2);
+    text-align: center;
+}
+
+.speed__settings .hint {
+    margin: 4px 0 0;
+}
+
+@media (prefers-color-scheme: dark) {
+    .speed-gauge__fill.is-down,
+    .speed-chart__down {
+        stroke: #B79CF0;
+    }
+
+    .speed-tile.is-down .speed-tile__value {
+        color: #C4ADF5;
+    }
+}
+
+@media (max-width: 860px) {
+    .speed {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* 测速源五个选项：放不下一行时折成两行（不横向滚动、不截字） */
+.speed__settings .seg {
+    flex-wrap: wrap;
+    border-radius: 20px;
+    overflow: visible;
+}
+
+.speed__settings .seg__item {
+    flex: 1 0 auto;
+    padding: 0 10px;
+}
