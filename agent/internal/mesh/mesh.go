@@ -175,14 +175,16 @@ type tsStatus struct {
 }
 
 type tsPeer struct {
-	ID            string
-	HostName      string
-	DNSName       string
-	OS            string
-	TailscaleIPs  []string
-	Online        bool
-	Relay         string
-	CurAddr       string
+	ID           string
+	HostName     string
+	DNSName      string
+	OS           string
+	TailscaleIPs []string
+	Online       bool
+	Relay        string
+	CurAddr      string
+	// 最近有没有往来。Relay 只是对端的 home DERP，不代表正在走中继：没往来时网页显示「空闲」（同 OpenWrt / 各客户端）
+	Active        bool
 	PrimaryRoutes []string
 }
 
@@ -459,6 +461,7 @@ type PeerView struct {
 	Online  bool     `json:"online"`
 	Relay   string   `json:"relay"`
 	Direct  bool     `json:"direct"`
+	Active  bool     `json:"active"`
 	Routes  []string `json:"routes"`
 }
 
@@ -502,7 +505,7 @@ func (m *Manager) View(ctx context.Context) View {
 }
 
 func peerView(p *tsPeer) PeerView {
-	v := PeerView{Name: p.HostName, DNSName: strings.TrimSuffix(p.DNSName, "."), OS: p.OS, Online: p.Online, Relay: p.Relay, Direct: p.CurAddr != "", Routes: p.PrimaryRoutes}
+	v := PeerView{Name: p.HostName, DNSName: strings.TrimSuffix(p.DNSName, "."), OS: p.OS, Online: p.Online, Relay: p.Relay, Direct: p.CurAddr != "", Active: p.Active, Routes: p.PrimaryRoutes}
 	if len(p.TailscaleIPs) > 0 {
 		v.IP = p.TailscaleIPs[0]
 	}

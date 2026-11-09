@@ -93,7 +93,7 @@ Profile：`{id, name, url?, info_url?, user_agent?, from_panel?, updated_at(秒)
 
 View：`{settings, hostname, state: {router_id, control_url, magic_dns, sites: [{original, advertised, mapped}], advertised, hosts, error, applied_at},
 panel_logged_in, daemon, backend("Running"/"NeedsLogin"…), self: Peer, peers: [Peer], control_url, advertised}`；
-Peer：`{name, dns_name, ip, os, online, relay, direct, routes}`。没登录主控时入网会失败并提示先登录；`host_access` = 喵窝里的设备能不能访问 NAS 本身（缺省开）。
+Peer：`{name, dns_name, ip, os, online, relay, direct, active, routes}`（`relay` 只是对端的 home DERP；`active` = 最近有往来，没有往来时网页显示「空闲」）。没登录主控时入网会失败并提示先登录；`host_access` = 喵窝里的设备能不能访问 NAS 本身（缺省开）。
 
 ## 内核 API（节点、连接、规则、日志）
 

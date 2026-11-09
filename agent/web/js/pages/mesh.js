@@ -193,7 +193,7 @@ export function Mesh({ active, go }) {
                     <div class="item__main">
                         <div class="item__name">${p.name || p.dns_name}</div>
                         <div class="item__meta">${[p.ip, (p.routes ?? []).join(', '), p.os,
-                        p.online ? (p.direct ? '直连' : p.relay ? `经中继 ${p.relay}` : '') : '离线'].filter(Boolean).join(' · ')}</div>
+                        p.online ? (p.direct ? '直连' : !p.active ? '空闲' : p.relay ? `经中继 ${p.relay}` : '') : '离线'].filter(Boolean).join(' · ')}</div>
                     </div>
                 </div>`)}</div>`}
         <//>`}
