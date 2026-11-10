@@ -32,19 +32,15 @@ func countRules(variant string) int {
 	if !haveBinary("iptables-" + variant + "-save") {
 		return -1
 	}
+	// 不带 -t（见 IPT.Save）
+	out, err := Exec("", "iptables-"+variant+"-save")
+	if err != nil {
+		return -1
+	}
 	n := 0
-	for _, table := range []string{"filter", "nat"} {
-		out, err := Exec("", "iptables-"+variant+"-save", "-t", table)
-		if err != nil {
-			if table == "filter" {
-				return -1
-			}
-			continue
-		}
-		for _, l := range strings.Split(out, "\n") {
-			if strings.HasPrefix(l, "-A ") {
-				n++
-			}
+	for _, l := range strings.Split(out, "\n") {
+		if strings.HasPrefix(l, "-A ") {
+			n++
 		}
 	}
 	return n

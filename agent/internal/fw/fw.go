@@ -188,22 +188,15 @@ func (t IPT) Restore(s *Script) error {
 	return nil
 }
 
-// Save：iptables-save 的输出（只要这几张表）
+// Save：iptables-save 的输出。不带 -t：只列已经在用的表——带 -t 时 legacy 会让内核加载那张表的模块（iptable_nat 等），
+// 撤规则 / 探测时不该顺手把宿主上没用到的表建出来
 func (t IPT) Save() (string, error) {
-	var all strings.Builder
-	for _, table := range []string{"nat", "mangle", "filter"} {
-		out, err := t.Run("", t.bin("-save"), "-t", table)
-		if err != nil {
-			return all.String(), err
-		}
-		all.WriteString(out)
-	}
-	return all.String(), nil
+	return t.Run("", t.bin("-save"))
 }
 
 // HasChain：某张表里有没有这条链（如 filter 表的 DOCKER-USER）
 func (t IPT) HasChain(table, chain string) bool {
-	out, err := t.Run("", t.bin("-save"), "-t", table)
+	out, err := t.Save()
 	if err != nil {
 		return false
 	}

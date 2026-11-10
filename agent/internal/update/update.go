@@ -198,13 +198,13 @@ func (u *Updater) fetchFeed(ctx context.Context) (version, released, image strin
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
 		return "", "", "", nil, errors.New("发布清单格式不对")
 	}
-	f, kind, name := doc.Platforms.Fnos, "fpk", "飞牛版"
+	f, kind, missing := doc.Platforms.Fnos, "fpk", "发布清单里没有飞牛版"
 	if u.platform().Docker {
 		// Docker 版的文件是离线镜像（docker save 出来的 tar，群晖「Container Manager」等可以导入）
-		f, kind, name = doc.Platforms.Docker, "image-tar", "Docker 版"
+		f, kind, missing = doc.Platforms.Docker, "image-tar", "发布清单里还没有 Docker 版"
 	}
 	if f == nil || f.Version == "" {
-		return "", "", "", nil, errors.New("发布清单里没有" + name)
+		return "", "", "", nil, errors.New(missing)
 	}
 	for i := range f.Files {
 		if f.Files[i].Kind == kind && f.Files[i].Arch == feedArch() && f.Files[i].URL != "" {

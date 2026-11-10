@@ -105,11 +105,7 @@ func TestIPTCleanupRuns(t *testing.T) {
 	run := func(stdin, name string, args ...string) (string, error) {
 		ran = append(ran, name+" "+strings.Join(args, " "))
 		if strings.HasSuffix(name, "-save") {
-			for i, a := range args {
-				if a == "-t" && i+1 < len(args) {
-					return tableOf(sampleSave, args[i+1]), nil
-				}
-			}
+			return sampleSave, nil
 		}
 		return "", nil
 	}
@@ -117,7 +113,7 @@ func TestIPTCleanupRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
-		"iptables-legacy-save -t nat", "iptables-legacy-save -t mangle", "iptables-legacy-save -t filter",
+		"iptables-legacy-save ",
 		"iptables-legacy -w 5 -t nat -D PREROUTING -i tailscale0 -j MEOWX_MESH_PRE",
 		"iptables-legacy -w 5 -t nat -F MEOWX_MESH_PRE",
 		"iptables-legacy -w 5 -t nat -X MEOWX_MESH_PRE",
@@ -125,21 +121,4 @@ func TestIPTCleanupRuns(t *testing.T) {
 	if !reflect.DeepEqual(ran, want) {
 		t.Fatalf("\n%q\n%q", ran, want)
 	}
-}
-
-func tableOf(save, table string) string {
-	var b strings.Builder
-	in := false
-	for _, l := range strings.Split(save, "\n") {
-		if strings.HasPrefix(l, "*") {
-			in = l == "*"+table
-		}
-		if in {
-			b.WriteString(l + "\n")
-			if l == "COMMIT" {
-				in = false
-			}
-		}
-	}
-	return b.String()
 }
