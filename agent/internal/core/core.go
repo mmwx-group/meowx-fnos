@@ -16,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/mmwx-group/meowx-fnos/agent/internal/platform"
 )
 
 // Paths：内核相关的文件位置（都在 /data 下，挂出来的数据卷）
@@ -44,8 +46,8 @@ func (p Paths) PanelEnv() []string {
 		"MEOWX_GGY_STATE=" + filepath.Join(p.Panel, "ggy.json"), // 没有 uci，GGY 设置存文件
 		"MEOWX_AKILE_STATE=" + p.AkileStatePath(),               // AkileCDN 白名单同样存文件
 		"MEOWX_AKILE_RESULT=" + p.AkileResultPath(),
-		"MEOWX_MESH_OS=fnos", // 喵窝入网时报给主控的系统 / 客户端
-		"MEOWX_MESH_CLIENT=meowx-fnos",
+		"MEOWX_MESH_OS=" + platform.Current().MeshOS, // 喵窝入网时报给主控的系统 / 客户端（飞牛版 fnos / meowx-fnos）
+		"MEOWX_MESH_CLIENT=" + platform.Current().MeshClient,
 	}
 }
 

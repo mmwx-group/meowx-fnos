@@ -206,7 +206,7 @@ function App() {
             <${Logo} />
             <div>
                 <div class="top__title">MeowX</div>
-                <div class="top__sub">飞牛 NAS 版${store.status.version ? ' · ' + store.status.version : ''}${store.release?.has_update
+                <div class="top__sub">${store.status.edition || '飞牛 NAS 版'}${store.status.version ? ' · ' + store.status.version : ''}${store.release?.has_update
             && html` · <a href="#settings">有新版本 ${store.release.latest}</a>`}</div>
             </div>
             <div class="top__status"><${StatusPill} status=${store.status} /></div>

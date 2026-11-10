@@ -9,7 +9,7 @@
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/status` | `{version, need_login, enabled, profile, core: {running, started_at, error, restarts}, error, mixed_port}`；`need_login` 为真时只有前两项 |
+| GET | `/api/status` | `{version, need_login, platform, edition, enabled, profile, core: {running, started_at, error, restarts}, error, mixed_port}`；`need_login` 为真时只有前四项。`platform` = `fnos` / `docker` / `synology` / `qnap` / `ugreen`（环境变量 `MEOWX_PLATFORM`），`edition` 是显示名（「飞牛 NAS 版」「群晖 Docker 版」…） |
 | POST | `/api/login` | `{password}` → 设 Cookie |
 | POST | `/api/service` | `{action: "start"\|"stop"\|"restart"}`；start / stop 会改开关并存盘 |
 | GET | `/api/settings` | 整份设置（结构见 `agent/internal/store/settings.go`，JSON 键是 snake_case） |
@@ -20,8 +20,8 @@
 | GET | `/api/speedtest/history` | 网络测速记录 `{records: [...]}`（新的在前，最多 50 条；每条的内容由网页定）。测速本身经 `/api/core/meowx/speedtest`（内核的测速接口：GET 进度、POST `start` / `stop`）|
 | POST | `/api/speedtest/history` | 记一条（JSON 对象，至多 4KB），回全部记录 |
 | DELETE | `/api/speedtest/history` | 清空测速记录 |
-| GET | `/api/update[?refresh=1]` | 检查新版本（`dl.miaomiaowux.com/meowx/latest.json` 的 `platforms.fnos`，缓存一小时）：`{current, latest, has_update, released_at, notes_url, download_url, size, can_install, reason, updating, last_error, error, checked_at}`；`can_install` 为假时 `reason` 说原因、界面给 `download_url` 让用户手动安装 |
-| POST | `/api/update` | 一键更新：下载新版安装包、校验 sha256、交给飞牛应用中心升级（`/rpc/v1` 的暂存 + update 任务），回 `{ok, version}`；之后应用中心停掉 MeowX、换上新版再启动，界面看 `/api/status` 的 `version` 变了就刷新 |
+| GET | `/api/update[?refresh=1]` | 检查新版本（`dl.miaomiaowux.com/meowx/latest.json` 的 `platforms.fnos`，Docker 版读 `platforms.docker`，缓存一小时）：`{current, latest, has_update, released_at, notes_url, download_url, size, image, can_install, reason, updating, last_error, error, checked_at}`；`can_install` 为假时 `reason` 说原因、界面给 `download_url` 让用户手动安装。Docker 版 `can_install` 一律为假，`image` 是清单里的镜像名、`download_url` 是离线镜像 |
+| POST | `/api/update` | 一键更新（只有飞牛版）：下载新版安装包、校验 sha256、交给飞牛应用中心升级（`/rpc/v1` 的暂存 + update 任务），回 `{ok, version}`；之后应用中心停掉 MeowX、换上新版再启动，界面看 `/api/status` 的 `version` 变了就刷新 |
 
 ## 透明代理
 

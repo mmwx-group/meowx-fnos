@@ -218,17 +218,29 @@ func (a *App) applyLocked(ctx context.Context) error {
 	if err := a.Core.Start(ctx); err != nil {
 		return err
 	}
-	if plan := hijack.HostRules(s); plan != nil {
+	host := hijack.Discover()
+	if plan := hijack.HostRules(s, host); plan != nil {
 		if err := hijack.ApplyHost(*plan); err != nil {
 			return fmt.Errorf("本机 DNS / fake-ip 规则没下发成功：%w", err)
 		}
+		if plan.RedirPort != 0 {
+			a.Log.Add("agent", fmt.Sprintf("没有策略路由：NAS 本机 / 容器的 TCP 经 REDIRECT 交给 redir %d，UDP 不代理", plan.RedirPort))
+		}
 	}
 	// 旁路由：内核的 tproxy 端口起来以后再把局域网设备的流量交过去
-	if plan := hijack.LAN(s, hijack.Discover()); plan != nil {
+	if plan := hijack.LAN(s, host); plan != nil {
 		if err := hijack.ApplyLAN(*plan); err != nil {
 			return fmt.Errorf("旁路由规则没下发成功：%w", err)
 		}
-		a.Log.Add("agent", fmt.Sprintf("旁路由已开：%v → tproxy %d", plan.Interfaces, plan.TProxyPort))
+		if plan.RedirPort != 0 {
+			udp := "UDP 经 TUN " + plan.TUNDevice
+			if plan.TUNDevice == "" {
+				udp = "UDP 不代理（没有策略路由）"
+			}
+			a.Log.Add("agent", fmt.Sprintf("旁路由已开（iptables）：%v → TCP 经 redir %d，%s", plan.Interfaces, plan.RedirPort, udp))
+		} else {
+			a.Log.Add("agent", fmt.Sprintf("旁路由已开：%v → tproxy %d", plan.Interfaces, plan.TProxyPort))
+		}
 	}
 	return nil
 }
@@ -251,6 +263,7 @@ func (a *App) Loop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case now := <-tick.C:
+			hijack.RefreshLAN() // iptables 后端：内核重启过的话补上 UDP 进 TUN 的路由
 			a.autoUpdate(ctx, now)
 			if a.reportDue(now, lastReport) {
 				lastReport = now

@@ -9,6 +9,7 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/fw"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -18,7 +19,7 @@ import (
 //     IPv6 就绕过了代理。内核自己发的查询打了 routing-mark，放行。
 //   - 发往 fake-ip 网段的一律进 TUN（策略路由优先级 8999，在内核的规则前面）：容器的 DNS 由 dockerd 代查，也会拿到 fake-ip，
 //     而 Docker 网桥默认整个排除在 TUN 外（免得弄断发布出去的端口），没有这条容器就上不了网。
-// 都在自己的表 inet meowx_host + 一条策略路由里，关掉时整个删掉。
+// 都在自己的表 inet meowx_host + 一条策略路由里，关掉时整个删掉。iptables 后端（群晖等）见 ipt.go：nat 表的 MEOWX_HOST 链。
 
 const (
 	hostTable   = "meowx_host"
@@ -27,6 +28,30 @@ const (
 
 func ApplyHost(p HostPlan) error {
 	CleanupHost()
+	if ipt, ok := fw.Current(); ok {
+		if err := ipt.Restore(hostScript(p)); err != nil {
+			CleanupHost()
+			return fmt.Errorf("下发本机规则：%w", err)
+		}
+	} else if err := applyHostNFT(p); err != nil {
+		return err
+	}
+	if p.FakeIPRange != "" && p.TUNTable != 0 {
+		_, dst, err := net.ParseCIDR(p.FakeIPRange)
+		if err != nil {
+			return fmt.Errorf("fake-ip 网段写错了：%w", err)
+		}
+		rule := netlink.NewRule()
+		rule.Dst, rule.Table, rule.Priority, rule.Family = dst, p.TUNTable, fakeRulePri, unix.AF_INET
+		if err := netlink.RuleAdd(rule); err != nil {
+			CleanupHost()
+			return fmt.Errorf("加 fake-ip 策略路由：%w", err)
+		}
+	}
+	return nil
+}
+
+func applyHostNFT(p HostPlan) error {
 	c, err := nftables.New()
 	if err != nil {
 		return err
@@ -52,22 +77,11 @@ func ApplyHost(p HostPlan) error {
 			return fmt.Errorf("下发 DNS 重定向：%w", err)
 		}
 	}
-	if p.FakeIPRange != "" && p.TUNTable != 0 {
-		_, dst, err := net.ParseCIDR(p.FakeIPRange)
-		if err != nil {
-			return fmt.Errorf("fake-ip 网段写错了：%w", err)
-		}
-		rule := netlink.NewRule()
-		rule.Dst, rule.Table, rule.Priority, rule.Family = dst, p.TUNTable, fakeRulePri, unix.AF_INET
-		if err := netlink.RuleAdd(rule); err != nil {
-			CleanupHost()
-			return fmt.Errorf("加 fake-ip 策略路由：%w", err)
-		}
-	}
 	return nil
 }
 
 func CleanupHost() {
+	cleanupIPT(hostChain)
 	if c, err := nftables.New(); err == nil {
 		if tables, err := c.ListTablesOfFamily(nftables.TableFamilyINet); err == nil {
 			for _, t := range tables {
@@ -92,4 +106,11 @@ func ifname16(name string) []byte {
 	b := make([]byte, 16)
 	copy(b, name)
 	return b
+}
+
+// cleanupIPT：镜像里有的每一套 iptables 都撤（飞牛版的镜像里没有 iptables，什么都不跑）
+func cleanupIPT(prefix string) {
+	for _, ipt := range fw.Variants(fw.Exec) {
+		_ = ipt.Cleanup(prefix)
+	}
 }

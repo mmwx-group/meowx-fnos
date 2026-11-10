@@ -5,12 +5,14 @@ package mesh
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/fw"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 	"golang.org/x/sys/unix"
 )
@@ -21,11 +23,20 @@ import (
 //   - Docker 把 IPv4 FORWARD 默认设成丢弃：在 Docker 留给用户的 DOCKER-USER 链里插两条放行（与 iptables 写出来的
 //     `-i tailscale0 -j ACCEPT` / `-o tailscale0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT` 同样的表达式，
 //     iptables-nft 认得），关掉时只删这两条。没有 DOCKER-USER（没装 Docker）时不需要。
+// iptables 后端（群晖等没有 nf_tables 的内核）见 firewall_ipt.go。
 
 const meshTable = "meowx_mesh"
 
 func firewallApply(s store.Mesh, sites []Site) error {
 	firewallRemove()
+	if ipt, ok := fw.Current(); ok {
+		sc, errs := meshScript(s, sites, ipt.HasChain("filter", "DOCKER-USER"))
+		if err := ipt.Restore(sc); err != nil {
+			firewallRemove()
+			return fmt.Errorf("下发喵窝的 iptables 规则：%w", err)
+		}
+		return errors.Join(errs...)
+	}
 	c, err := nftables.New()
 	if err != nil {
 		return err
@@ -85,6 +96,9 @@ func firewallApply(s store.Mesh, sites []Site) error {
 }
 
 func firewallRemove() {
+	for _, ipt := range fw.Variants(fw.Exec) {
+		_ = ipt.Cleanup("MEOWX_MESH")
+	}
 	c, err := nftables.New()
 	if err != nil {
 		return

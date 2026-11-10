@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/mmwx-group/meowx-fnos/agent/internal/core"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/platform"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 )
 
@@ -257,7 +258,7 @@ func (m *Manager) routerID(st *State) string {
 	if st.RouterID == "" {
 		var b [8]byte
 		_, _ = rand.Read(b[:])
-		st.RouterID = "fnos-" + hex.EncodeToString(b[:])
+		st.RouterID = platform.Current().ID + "-" + hex.EncodeToString(b[:]) // 飞牛版 fnos-…
 	}
 	return st.RouterID
 }

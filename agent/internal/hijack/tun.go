@@ -14,13 +14,16 @@ import (
 	"net"
 	"strings"
 
+	"github.com/mmwx-group/meowx-fnos/agent/internal/fw"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 )
 
-// Host：宿主机的网卡（容器是宿主网络，看到的就是宿主的）
+// Host：宿主机的网卡（容器是宿主网络，看到的就是宿主的）与防火墙后端
 type Host struct {
 	Physical []Iface // 物理网卡（有 IPv4 的），局域网入口
 	Bridges  []Iface // Docker 网桥（docker0、br-*）
+	// 零值 = nftables + 有策略路由（飞牛版的做法）；iptables 后端见 ipt.go
+	Firewall fw.Env `json:"firewall"`
 }
 
 type Iface struct {
@@ -33,7 +36,7 @@ type Iface struct {
 var virtualPrefixes = []string{"lo", "docker", "br-", "veth", "tun", "tap", "tailscale", "meowx", "virbr", "vnet", "wg", "dummy", "ovs-", "kube", "cni", "flannel"}
 
 func Discover() Host {
-	var h Host
+	h := Host{Firewall: fw.Detect()}
 	ifs, _ := net.Interfaces()
 	for _, i := range ifs {
 		up := i.Flags&net.FlagUp != 0
@@ -66,16 +69,36 @@ func isVirtual(name string) bool {
 	return false
 }
 
-// TUN 生成内核的 tun 配置。nil = 透明代理关着。
+// TUN 生成内核的 tun 配置。nil = 透明代理关着（或没有策略路由、TUN 用不上）。
 func TUN(s store.Settings, h Host) map[string]any {
 	p := s.Proxy
-	// 局域网设备（旁路由）走 TPROXY（见 lan.go），TUN 只管 NAS 本机与其它容器
-	if !p.Enabled || (!p.HostProxy && !p.ContainerProxy) {
+	if !p.Enabled {
 		return nil
+	}
+	// 局域网设备（旁路由）走 TPROXY（见 lan.go），TUN 只管 NAS 本机与其它容器。
+	// 没有策略路由时 auto-route 用不了，本机与容器退化成 REDIRECT（HostRules），不起 TUN
+	hostTUN := (p.HostProxy || p.ContainerProxy) && !h.Firewall.NoPolicyRouting
+	// iptables 后端的旁路由：UDP 经策略路由送进 TUN（ipt.go），只要有这块网卡、不让内核自己接管路由
+	lanTUN := lanUDPViaTUN(s, h)
+	if !hostTUN && !lanTUN {
+		return nil
+	}
+	if !hostTUN {
+		t := map[string]any{
+			"enable":                true,
+			"device":                TUNDevice(s),
+			"stack":                 orDefault(s.Mixin.TUN.Stack, "mixed"),
+			"auto-route":            false,
+			"auto-detect-interface": true,
+		}
+		if s.Mixin.TUN.MTU > 0 {
+			t["mtu"] = s.Mixin.TUN.MTU
+		}
+		return t
 	}
 	t := map[string]any{
 		"enable":                true,
-		"device":                orDefault(s.Mixin.TUN.Device, "meowx"),
+		"device":                TUNDevice(s),
 		"stack":                 orDefault(s.Mixin.TUN.Stack, "mixed"),
 		"auto-route":            true,
 		"auto-detect-interface": true,
@@ -141,15 +164,45 @@ func LANInterfaces(chosen []string, h Host) []string {
 	return out
 }
 
-// HostRules：NAS 本机 / 容器透明代理开着时，另外要下发的 DNS 重定向与 fake-ip 策略路由；nil = 不需要
-func HostRules(s store.Settings) *HostPlan {
+// TUNDevice：内核 TUN 网卡名
+func TUNDevice(s store.Settings) string { return orDefault(s.Mixin.TUN.Device, "meowx") }
+
+// lanUDPViaTUN：iptables 后端开着旁路由、有策略路由：局域网设备的 UDP 打标记送进 TUN
+func lanUDPViaTUN(s store.Settings, h Host) bool {
 	p := s.Proxy
-	if TUN(s, Host{}) == nil {
+	return p.Enabled && p.LANProxy && h.Firewall.IsIPTables() && !h.Firewall.NoPolicyRouting && s.Mixin.RedirPort != 0
+}
+
+// HostRules：NAS 本机 / 容器透明代理开着时，另外要下发的 DNS 重定向与 fake-ip 策略路由；nil = 不需要。
+// 没有策略路由时（iptables 后端）改成 REDIRECT：本机与容器的 TCP 交给内核的 redir 端口
+func HostRules(s store.Settings, h Host) *HostPlan {
+	p := s.Proxy
+	if !p.Enabled || (!p.HostProxy && !p.ContainerProxy) {
 		return nil
 	}
 	plan := &HostPlan{CoreMark: CoreMark, TUNTable: TUNTable}
 	if p.HostProxy && p.DNSHijack && s.Mixin.DNS.Enabled {
 		plan.DNSPort = listenPort(s.Mixin.DNS.Listen)
+	}
+	if h.Firewall.NoPolicyRouting {
+		if !h.Firewall.IsIPTables() || s.Mixin.RedirPort == 0 {
+			return plan // nftables 后端没有退化做法：只剩 DNS 重定向
+		}
+		plan.RedirPort = uint16(s.Mixin.RedirPort)
+		plan.RedirectHost = p.HostProxy
+		if p.ContainerProxy {
+			for _, b := range h.Bridges {
+				plan.Bridges = append(plan.Bridges, b.Name)
+			}
+			if p.DNSHijack && s.Mixin.DNS.Enabled {
+				plan.BridgeDNSPort = listenPort(s.Mixin.DNS.Listen)
+			}
+		}
+		plan.Reserved = append([]string{}, p.ReservedIP...)
+		for _, i := range h.Physical {
+			plan.Reserved = append(plan.Reserved, i.Subnets...)
+		}
+		return plan // 没有 TUN，fake-ip 段也就不用策略路由
 	}
 	if s.Mixin.DNS.Mode == "fake-ip" {
 		plan.FakeIPRange = s.Mixin.DNS.FakeIPRange
@@ -163,7 +216,11 @@ func HostRules(s store.Settings) *HostPlan {
 // LAN 生成旁路由的规则计划；nil = 不开旁路由
 func LAN(s store.Settings, h Host) *LANPlan {
 	p := s.Proxy
-	if !p.Enabled || !p.LANProxy || s.Mixin.TProxyPort == 0 {
+	if !p.Enabled || !p.LANProxy {
+		return nil
+	}
+	// nftables 走 TPROXY，iptables 后端（没有 TPROXY）走 REDIRECT
+	if h.Firewall.IsIPTables() && s.Mixin.RedirPort == 0 || !h.Firewall.IsIPTables() && s.Mixin.TProxyPort == 0 {
 		return nil
 	}
 	reserved := append([]string{}, p.ReservedIP...)
@@ -171,6 +228,12 @@ func LAN(s store.Settings, h Host) *LANPlan {
 		reserved = append(reserved, i.Subnets...)
 	}
 	plan := &LANPlan{Interfaces: LANInterfaces(p.LANInterfaces, h), Reserved: reserved, TProxyPort: uint16(s.Mixin.TProxyPort)}
+	if h.Firewall.IsIPTables() {
+		plan.RedirPort = uint16(s.Mixin.RedirPort)
+		if lanUDPViaTUN(s, h) {
+			plan.TUNDevice = TUNDevice(s)
+		}
+	}
 	if p.DNSHijack && s.Mixin.DNS.Enabled {
 		plan.DNSPort = listenPort(s.Mixin.DNS.Listen)
 	}

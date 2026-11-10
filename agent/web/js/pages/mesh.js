@@ -33,7 +33,7 @@ const formOf = (s) => ({
 });
 
 export function Mesh({ active, go }) {
-    const { panel } = useStore();
+    const { panel, status } = useStore();
     const [data, setData] = useState(null);       // { mesh: View, lan: [] }
     const [error, setError] = useState('');
     const [form, setForm] = useState(null);
@@ -174,7 +174,7 @@ export function Mesh({ active, go }) {
                 <${Switch} label="喵窝里的设备能访问 NAS 本身" checked=${form.host_access} onChange=${(on) => setF({ host_access: on })} />
             <//>
             <${Field} label="设备名" desc="在喵窝里显示的名字" wide>
-                <input class="input" placeholder=${v.hostname || 'fnos'} spellcheck="false" autocomplete="off"
+                <input class="input" placeholder=${v.hostname || (status?.platform && status.platform != 'fnos' ? 'meowx-nas' : 'fnos')} spellcheck="false" autocomplete="off"
                     value=${form.hostname} onInput=${(e) => setF({ hostname: e.currentTarget.value })} />
             <//>
             <div class="card__actions" style="justify-content:flex-start;margin-top:8px">

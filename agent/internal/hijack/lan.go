@@ -6,10 +6,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net"
+	"os"
+	"sync"
+	"time"
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/fw"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 )
@@ -19,6 +23,7 @@ import (
 // 局域网进来、往 TUN 出去的转发包会被它挡掉，而我们不去改 Docker 自己的防火墙表。
 //
 // 全部在自己的 nftables 表 inet meowx 里 + 一条 fwmark 策略路由（表 80，优先级 1024），关掉时整个删掉。
+// iptables 后端（群晖等没有 TPROXY 的内核）另一套做法，见 ipt.go 与这里的 applyLANIPT。
 
 const (
 	lanTable   = "meowx"
@@ -31,6 +36,9 @@ const (
 // ApplyLAN 下发旁路由规则（先清掉旧的）
 func ApplyLAN(p LANPlan) error {
 	CleanupLAN()
+	if ipt, ok := fw.Current(); ok {
+		return applyLANIPT(ipt, p)
+	}
 	if len(p.Interfaces) == 0 || p.TProxyPort == 0 {
 		return fmt.Errorf("旁路由要至少一个局域网入口网卡和 tproxy 端口")
 	}
@@ -117,6 +125,11 @@ func ApplyLAN(p LANPlan) error {
 
 // CleanupLAN 撤掉旁路由（没有就什么都不做；容器起来时也调一次，清掉上次崩溃留下的）
 func CleanupLAN() {
+	lanMu.Lock()
+	lanActive = nil
+	lanMu.Unlock()
+	cleanupIPT(lanChain)
+	cleanupLANUDP()
 	if c, err := nftables.New(); err == nil {
 		if tables, err := c.ListTablesOfFamily(nftables.TableFamilyINet); err == nil {
 			for _, t := range tables {
@@ -176,4 +189,99 @@ func intervalElements(cidrs []string) ([]nftables.SetElement, error) {
 		out = append(out, nftables.SetElement{Key: end, IntervalEnd: true})
 	}
 	return out, nil
+}
+
+// ---------- iptables 后端 ----------
+
+var (
+	lanMu     sync.Mutex
+	lanActive *LANPlan // iptables 后端下发着的旁路由（RefreshLAN 补路由用）
+)
+
+func applyLANIPT(ipt fw.IPT, p LANPlan) error {
+	if len(p.Interfaces) == 0 || p.RedirPort == 0 {
+		return fmt.Errorf("旁路由要至少一个局域网入口网卡和 redir 端口")
+	}
+	if err := ipt.Restore(lanScript(p, ipt.HasChain("filter", "DOCKER-USER"))); err != nil {
+		CleanupLAN()
+		return fmt.Errorf("下发 iptables 规则：%w", err)
+	}
+	if p.TUNDevice != "" {
+		if err := addLANUDP(p.TUNDevice, 15*time.Second); err != nil {
+			CleanupLAN()
+			return err
+		}
+	}
+	lanMu.Lock()
+	lanActive = &p
+	lanMu.Unlock()
+	return nil
+}
+
+// addLANUDP：打了标记 0x81 的包（局域网设备的 UDP）→ 表 81 → 默认路由指向内核的 TUN。
+// 内核刚起来时 TUN 网卡可能还没建好，等一会儿
+func addLANUDP(dev string, wait time.Duration) error {
+	deadline := time.Now().Add(wait)
+	var link netlink.Link
+	for {
+		l, err := netlink.LinkByName(dev)
+		if err == nil {
+			link = l
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("等不到内核的 TUN 网卡 %s：%w", dev, err)
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	// 回包从 TUN 进来、源地址是外网：反向路径检查在严格模式下会丢，这块网卡改成宽松（/proc/sys 只读时写不进，见 docs/docker.md）
+	_ = os.WriteFile("/proc/sys/net/ipv4/conf/"+dev+"/rp_filter", []byte("2"), 0o644)
+	_, all, _ := net.ParseCIDR("0.0.0.0/0")
+	if err := netlink.RouteReplace(&netlink.Route{LinkIndex: link.Attrs().Index, Dst: all, Table: lanUDPRoute, Scope: netlink.SCOPE_LINK}); err != nil {
+		return fmt.Errorf("加 UDP 进 TUN 的路由：%w", err)
+	}
+	rules, _ := netlink.RuleList(unix.AF_INET)
+	for _, r := range rules {
+		if r.Priority == lanUDPRulePri {
+			return nil
+		}
+	}
+	rule := netlink.NewRule()
+	rule.Mark, rule.Mask, rule.Table, rule.Priority, rule.Family = lanUDPMark, ptr(uint32(lanMask)), lanUDPRoute, lanUDPRulePri, unix.AF_INET
+	if err := netlink.RuleAdd(rule); err != nil {
+		return fmt.Errorf("加 UDP 进 TUN 的策略路由：%w", err)
+	}
+	return nil
+}
+
+func cleanupLANUDP() {
+	if rules, err := netlink.RuleList(unix.AF_INET); err == nil {
+		for _, r := range rules {
+			if r.Priority == lanUDPRulePri && r.Table == lanUDPRoute {
+				r := r
+				_ = netlink.RuleDel(&r)
+			}
+		}
+	}
+	if routes, err := netlink.RouteListFiltered(unix.AF_INET, &netlink.Route{Table: lanUDPRoute}, netlink.RT_FILTER_TABLE); err == nil {
+		for _, r := range routes {
+			r := r
+			_ = netlink.RouteDel(&r)
+		}
+	}
+}
+
+// RefreshLAN：内核崩了被重启时 TUN 网卡是新建的，表 81 里指向旧网卡的路由跟着没了：定时补上（每分钟一次，没开着就什么都不做）
+func RefreshLAN() {
+	lanMu.Lock()
+	p := lanActive
+	lanMu.Unlock()
+	if p == nil || p.TUNDevice == "" {
+		return
+	}
+	routes, err := netlink.RouteListFiltered(unix.AF_INET, &netlink.Route{Table: lanUDPRoute}, netlink.RT_FILTER_TABLE)
+	if err == nil && len(routes) > 0 {
+		return
+	}
+	_ = addLANUDP(p.TUNDevice, 0)
 }

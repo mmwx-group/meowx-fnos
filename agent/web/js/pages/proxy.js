@@ -1,4 +1,5 @@
 // 透明代理（settings.proxy）：NAS 本机 / 其它容器走内核 TUN，旁路由（局域网设备）走 TPROXY。
+// iptables 后端（群晖等，GET /api/host 的 firewall）：旁路由的 TCP 走 REDIRECT、UDP 经 TUN；没有策略路由时本机与容器也退化成 REDIRECT、UDP 不代理
 // 打开或改了之后进试用期：到点没在顶部横条点「保留设置」，控制服务自动关掉透明代理（防止把 NAS 的网络弄断）
 import { html, useState, useEffect } from '../lib.js';
 import { get } from '../api.js';
@@ -36,7 +37,7 @@ function InterfacePicker({ value, onChange, host }) {
 export function ProxyPage({ active }) {
     const { status } = useStore();
     const form = useSettingsForm('proxy',
-        (s) => ({ proxy: s.proxy, mixin: { tproxy_port: s.mixin.tproxy_port, dns_enabled: s.mixin.dns.enabled } }),
+        (s) => ({ proxy: s.proxy, mixin: { tproxy_port: s.mixin.tproxy_port, redir_port: s.mixin.redir_port, dns_enabled: s.mixin.dns.enabled } }),
         (s, v) => { s.proxy = v.proxy; },
         active);
     const [host, setHost] = useState(null);
@@ -72,6 +73,9 @@ export function ProxyPage({ active }) {
     const tun = v('host_proxy') || v('container_proxy');
     const lan = v('lan_proxy');
     const mixin = form.draft.mixin;
+    const firewall = host?.firewall ?? {};
+    const ipt = firewall.backend == 'iptables';
+    const noPR = !!firewall.no_policy_routing;
 
     return html`<div>
         <${Card} title="透明代理" i=${0}
@@ -79,6 +83,7 @@ export function ProxyPage({ active }) {
             actions=${onOff('enabled', '启用透明代理')}>
             <p class="hint">打开或改了透明代理后有 ${v('keep_minutes') || 0} 分钟试用期：确认网络正常后点顶部的「保留设置」；没点的话到时间自动关掉，防止把 NAS 的网络（连带 SSH、这个网页）弄断。</p>
             ${enabled && !status?.enabled && html`<p class="error-text">MeowX 没在运行，启动后透明代理才生效。</p>`}
+            ${(ipt || noPR) && html`<p class="hint">防火墙：${ipt ? `iptables（${firewall.iptables}）` : 'nftables'}${noPR ? '，没有策略路由' : ''}${firewall.note ? `（${firewall.note}）` : ''}。</p>`}
         <//>
 
         <${Card} title="接管哪些流量" i=${1}>
@@ -88,15 +93,16 @@ export function ProxyPage({ active }) {
             <${Field} label="旁路由（局域网设备）" desc="局域网设备把网关（和 DNS）改成 NAS 的 IP 后，它们的流量经 NAS 走代理。只代理 IPv4。">${onOff('lan_proxy', '旁路由')}<//>
         <//>
 
-        ${tun && html`<${Card} title="NAS 本机与容器" desc="走内核的 TUN。" i=${2}>
-            <${Field} label="TCP 模式" desc="Redirect = TCP 用 nftables 重定向给内核（auto-redirect），比全进 TUN 省 CPU；UDP 都走 TUN" wide>
+        ${tun && html`<${Card} title="NAS 本机与容器" desc=${noPR ? '这台 NAS 没有策略路由，用不了 TUN：TCP 经 REDIRECT 交给内核，UDP 不代理（DNS 照样劫持）。' : '走内核的 TUN。'} i=${2}>
+            <${Field} label="TCP 模式" desc=${`Redirect = TCP 用 ${ipt ? 'iptables' : 'nftables'} 重定向给内核（auto-redirect），比全进 TUN 省 CPU；UDP 都走 TUN`} wide>
                 <${Select} ...${b('tcp_mode')} options=${[['tun', 'TUN 模式'], ['redirect', 'Redirect 模式']]} />
             <//>
             <${Field} label="IPv6" desc="NAS 本机与容器的 IPv6 流量也走代理">${onOff('ipv6', 'IPv6')}<//>
         <//>`}
 
-        ${lan && html`<${Card} title="旁路由" desc="走 TPROXY。" i=${3}>
-            ${!mixin.tproxy_port && html`<p class="error-text">「混入设置 › 入站」里的 TPROXY 端口是空的，旁路由不会生效。</p>`}
+        ${lan && html`<${Card} title="旁路由" desc=${!ipt ? '走 TPROXY。' : noPR ? 'TCP 走 REDIRECT；没有策略路由，UDP 不代理（DNS 照样劫持）。' : 'TCP 走 REDIRECT，UDP 经内核的 TUN（这台 NAS 没有 TPROXY）。'} i=${3}>
+            ${!ipt && !mixin.tproxy_port && html`<p class="error-text">「混入设置 › 入站」里的 TPROXY 端口是空的，旁路由不会生效。</p>`}
+            ${ipt && !mixin.redir_port && html`<p class="error-text">「混入设置 › 入站」里的 Redirect 端口是空的，旁路由不会生效。</p>`}
             <div class="section-title">局域网入口网卡（都不选 = 全部物理网卡）</div>
             <${InterfacePicker} ...${b('lan_interfaces')} host=${host} />
         <//>`}

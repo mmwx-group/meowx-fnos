@@ -1,11 +1,12 @@
 // 设置 / 关于：版本、网页访问密码、订阅自动更新间隔、启用前检查配置
 import { html, useState, useEffect } from '../lib.js';
 import { get, post } from '../api.js';
-import { useStore, update, saveSettings, login, refreshStatus, refreshRelease, toast } from '../store.js';
+import { useStore, update, saveSettings, login, refreshStatus, refreshRelease, toast, isDocker } from '../store.js';
 import { Card, Field, Switch, NumberInput, Button, SaveBar, Logo, useSettingsForm } from '../ui.js';
 import { stripPeriod } from '../util.js';
 
-// 版本卡里的「检查更新 / 立即更新」：一键更新经飞牛应用中心原地升级（保留设置与订阅），用不了时给安装包下载地址
+// 版本卡里的「检查更新 / 立即更新」：一键更新经飞牛应用中心原地升级（保留设置与订阅），用不了时给安装包下载地址；
+// Docker 版不一键更新，只提示换镜像（镜像名 / 离线镜像下载地址来自发布清单）
 function UpdateRow() {
     const { release, upgrading } = useStore();
     const [, tick] = useState(0);
@@ -59,9 +60,10 @@ function UpdateRow() {
             <span>新版本 <b>${release.latest}</b>${release.notes_url && html` · <a href=${release.notes_url} target="_blank" rel="noopener">更新内容</a>`}</span>
             ${release.can_install
             ? html`<${Button} small kind="primary" onClick=${install}>立即更新<//>`
-            : release.download_url && html`<a class="btn small" href=${release.download_url} target="_blank" rel="noopener">下载安装包</a>`}
+            : release.download_url && html`<a class="btn small" href=${release.download_url} target="_blank" rel="noopener">${isDocker() ? '下载离线镜像' : '下载安装包'}</a>`}
         </div>
         ${!release.can_install && release.reason && html`<p class="hint">${stripPeriod(release.reason)}。</p>`}
+        ${isDocker() && release.image && html`<p class="hint">镜像：<span class="mono">${release.image}</span>（用 docker compose 的：<span class="mono">docker compose pull && docker compose up -d</span>）</p>`}
         ${last}`;
 }
 
@@ -104,7 +106,7 @@ function PasswordCard() {
         toast('已清除访问密码');
     };
     return html`<${Card} title="网页访问密码" i=${1}
-        desc="设置后打开管理页面要先输入密码。飞牛自己的登录管不到这个端口：NAS 的端口开放到外网时一定要设。">
+        desc=${`设置后打开管理页面要先输入密码。${isDocker() ? 'NAS ' : '飞牛'}自己的登录管不到这个端口：NAS 的端口开放到外网时一定要设。`}>
         <${Field} label="当前">${has == null ? '…' : has ? html`<span class="badge">已设置</span>` : html`<span class="badge is-muted">没有设置</span>`}<//>
         <form class="inline can-wrap" onSubmit=${(e) => e.preventDefault()}>
             <input class="input" type="password" autocomplete="new-password" placeholder=${has ? '新密码' : '设置密码'} value=${pw} onInput=${(e) => setPw(e.currentTarget.value)} />
@@ -140,7 +142,7 @@ export function SettingsPage({ active }) {
             <div class="account">
                 <${Logo} />
                 <div class="account__main">
-                    <div class="account__name">MeowX 飞牛 NAS 版</div>
+                    <div class="account__name">MeowX ${status?.edition || '飞牛 NAS 版'}</div>
                     <div class="account__host mono">控制服务 ${status?.version || '-'} · 内核 ${coreVersion || (running ? '…' : '没在运行')}</div>
                 </div>
             </div>

@@ -10,6 +10,8 @@ func ApplyLAN(LANPlan) error { return errors.New("旁路由只在 Linux 上可�
 
 func CleanupLAN() {}
 
+func RefreshLAN() {}
+
 func ApplyHost(HostPlan) error { return errors.New("只在 Linux 上可用") }
 
 func CleanupHost() {}

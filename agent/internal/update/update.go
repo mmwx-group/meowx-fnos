@@ -5,6 +5,9 @@
 // token，只有 root 与官方应用组能连）：先暂存安装包，再提交 upgrade 任务——保留应用数据、失败自己回滚。
 // 容器里是 root，docker-compose 把这个 socket 挂进来就能用（社群商店 conversun/fnos-store 同样走这条路，
 // 接口与字段按它的实测记录对过）。升级时应用中心先停掉本应用，这个进程会被换掉，所以只等到任务提交成功为止。
+//
+// 通用 Docker 版（Platform.Docker）：读发布清单里 docker 一段，只检查、不一键更新——容器换不了自己的镜像，
+// 网页上告诉用户拉新镜像（或下载离线镜像导入）后重建容器。
 package update
 
 import (
@@ -26,6 +29,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/mmwx-group/meowx-fnos/agent/internal/platform"
 )
 
 const (
@@ -39,6 +44,7 @@ const (
 
 type Updater struct {
 	Version     string // 当前版本
+	Platform    platform.Info
 	FeedURL     string
 	Socket      string
 	DataDir     string // 容器里的数据目录（/data），安装包下载到它下面的 update/
@@ -62,6 +68,7 @@ type Info struct {
 	ReleasedAt  string `json:"released_at,omitempty"`
 	NotesURL    string `json:"notes_url,omitempty"`
 	DownloadURL string `json:"download_url,omitempty"`
+	Image       string `json:"image,omitempty"` // Docker 版：镜像名（发布清单里有时）
 	Size        int64  `json:"size,omitempty"`
 	CanInstall  bool   `json:"can_install"`
 	Reason      string `json:"reason,omitempty"` // 不能一键更新的原因
@@ -86,7 +93,15 @@ func (u *Updater) logf(format string, args ...any) {
 	}
 }
 
-func (u *Updater) userAgent() string { return "MeowX/" + u.Version + " (fnOS)" }
+// 没设 Platform 的当飞牛版
+func (u *Updater) platform() platform.Info {
+	if u.Platform.ID == "" {
+		return platform.Parse("")
+	}
+	return u.Platform
+}
+
+func (u *Updater) userAgent() string { return "MeowX/" + u.Version + " (" + u.platform().UAOS + ")" }
 
 // 发布清单里的架构名
 func feedArch() string {
@@ -113,11 +128,11 @@ func (u *Updater) Check(ctx context.Context, force bool) Info {
 	u.mu.Unlock()
 
 	info := Info{Current: u.Version, CheckedAt: time.Now().Unix()}
-	latest, released, file, err := u.fetchFeed(ctx)
+	latest, released, image, file, err := u.fetchFeed(ctx)
 	if err != nil {
 		info.Error = err.Error()
 	} else {
-		info.Latest, info.ReleasedAt = latest, released
+		info.Latest, info.ReleasedAt, info.Image = latest, released, image
 		info.NotesURL = releasePage + latest
 		info.HasUpdate = Newer(latest, u.Version)
 		if file != nil {
@@ -125,7 +140,9 @@ func (u *Updater) Check(ctx context.Context, force bool) Info {
 		}
 	}
 	if info.HasUpdate {
-		if file == nil {
+		if u.platform().Docker {
+			info.Reason = "Docker 版不能在网页里一键更新：拉取新镜像（或下载新版离线镜像导入）后重建容器，设置与订阅都在数据目录里、会保留"
+		} else if file == nil {
 			info.Reason = "新版本没有适合这台 NAS 的安装包"
 		} else if reason := u.installBlocker(ctx); reason != "" {
 			info.Reason = reason
@@ -143,7 +160,7 @@ func (u *Updater) Check(ctx context.Context, force bool) Info {
 	return info
 }
 
-func (u *Updater) fetchFeed(ctx context.Context) (version, released string, file *feedFile, err error) {
+func (u *Updater) fetchFeed(ctx context.Context) (version, released, image string, file *feedFile, err error) {
 	feed := u.FeedURL
 	if feed == "" {
 		feed = DefaultFeed
@@ -154,41 +171,48 @@ func (u *Updater) fetchFeed(ctx context.Context) (version, released string, file
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, feed+sep+"t="+strconv.FormatInt(time.Now().Unix(), 10), nil)
 	if err != nil {
-		return "", "", nil, err
+		return "", "", "", nil, err
 	}
 	// Cloudflare 会拦没有像样 UA 的请求
 	req.Header.Set("User-Agent", u.userAgent())
 	resp, err := u.Client.Do(req)
 	if err != nil {
-		return "", "", nil, fmt.Errorf("取不到发布清单：%w", err)
+		return "", "", "", nil, fmt.Errorf("取不到发布清单：%w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode/100 != 2 {
-		return "", "", nil, fmt.Errorf("取不到发布清单：HTTP %d", resp.StatusCode)
+		return "", "", "", nil, fmt.Errorf("取不到发布清单：HTTP %d", resp.StatusCode)
+	}
+	type section struct {
+		Version    string     `json:"version"`
+		ReleasedAt string     `json:"releasedAt"`
+		Image      string     `json:"image"` // 只有 docker 一段有：镜像名
+		Files      []feedFile `json:"files"`
 	}
 	var doc struct {
 		Platforms struct {
-			Fnos *struct {
-				Version    string     `json:"version"`
-				ReleasedAt string     `json:"releasedAt"`
-				Files      []feedFile `json:"files"`
-			} `json:"fnos"`
+			Fnos   *section `json:"fnos"`
+			Docker *section `json:"docker"`
 		} `json:"platforms"`
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&doc); err != nil {
-		return "", "", nil, errors.New("发布清单格式不对")
+		return "", "", "", nil, errors.New("发布清单格式不对")
 	}
-	f := doc.Platforms.Fnos
+	f, kind, name := doc.Platforms.Fnos, "fpk", "飞牛版"
+	if u.platform().Docker {
+		// Docker 版的文件是离线镜像（docker save 出来的 tar，群晖「Container Manager」等可以导入）
+		f, kind, name = doc.Platforms.Docker, "image-tar", "Docker 版"
+	}
 	if f == nil || f.Version == "" {
-		return "", "", nil, errors.New("发布清单里没有飞牛版")
+		return "", "", "", nil, errors.New("发布清单里没有" + name)
 	}
 	for i := range f.Files {
-		if f.Files[i].Kind == "fpk" && f.Files[i].Arch == feedArch() && f.Files[i].URL != "" {
+		if f.Files[i].Kind == kind && f.Files[i].Arch == feedArch() && f.Files[i].URL != "" {
 			file = &f.Files[i]
 			break
 		}
 	}
-	return f.Version, f.ReleasedAt, file, nil
+	return f.Version, f.ReleasedAt, f.Image, file, nil
 }
 
 // Newer：a 比 b 新（按点分的数字逐段比，段里数字后面的后缀不算；b 不是版本号时不算新）
