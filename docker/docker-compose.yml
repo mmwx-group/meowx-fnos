@@ -1,0 +1,30 @@
+# MeowX 通用 Docker 版：群晖（Container Manager 的「项目」）、威联通（Container Station 的「应用程序」）、绿联（Docker 的「项目」）
+# 都可以直接用这份。安装步骤见 docs/docker.md。
+#
+# 要的权限与飞牛版一样：宿主网络 + NET_ADMIN / NET_RAW + /dev/net/tun。
+# 群晖默认没有 /dev/net/tun：先 `sudo insmod /lib/modules/tun.ko`（开机自动加载见 docs/docker.md），否则容器起不来。
+services:
+  meowx:
+    # 离线导入的镜像叫 meowx-docker:<版本>（也带 latest）；以后发布到镜像仓库后换成仓库里的名字
+    image: meowx-docker:latest
+    container_name: meowx
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      # 显示名与报给主控的系统名：docker / synology / qnap / ugreen
+      - MEOWX_PLATFORM=docker
+      - MEOWX_UI_PORT=7899
+      - TZ=Asia/Shanghai
+      # 防火墙后端，缺省自动（有 nf_tables 用 nftables，没有用 iptables）。排查时可强制：nftables / iptables
+      # - MEOWX_FIREWALL=auto
+      # 当作没有策略路由（透明代理退化成 REDIRECT、UDP 不代理）：内核的 TUN 起不来时试试
+      # - MEOWX_POLICY_ROUTING=off
+    volumes:
+      # 设置、订阅、内核数据、喵窝的设备身份都在这里；升级换镜像时保留它
+      - ./data:/data
+    restart: unless-stopped
+    stop_grace_period: 30s
