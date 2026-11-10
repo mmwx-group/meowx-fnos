@@ -12,7 +12,7 @@
 | GET | `/api/status` | `{version, need_login, enabled, profile, core: {running, started_at, error, restarts}, error, mixed_port}`；`need_login` 为真时只有前两项 |
 | POST | `/api/login` | `{password}` → 设 Cookie |
 | POST | `/api/service` | `{action: "start"\|"stop"\|"restart"}`；start / stop 会改开关并存盘 |
-| GET | `/api/settings` | 整份设置（结构见 `agent/internal/store/settings.go`，JSON 键是 snake_case） |
+| GET | `/api/settings` | 整份设置（结构见 `agent/internal/store/settings.go`，JSON 键是 snake_case）。`test_url` = 节点页手动测延迟的地址：空（缺省）= 跟随订阅，测某个组用这个组写的 `url`（内核回的 `testUrl`），没写的用内置默认 `https://www.gstatic.com/generate_204`；填了就一律用它。只接受带主机名的 http / https 地址，`PUT` 时不合法回 400 |
 | PUT | `/api/settings` | 整份替换；默认存完立刻套用（`?apply=0` 只存）。回 `{settings, trial, error?}`；打开或改了透明代理时**套用之前**就进试用期，套用失败也会到点自动关 |
 | GET | `/api/runconfig` | 当前在跑的运行配置（YAML 文本，只读看） |
 | GET | `/api/logs?after=<序号>&source=core\|agent` | 日志增量：`[{seq, time(ms), source, text}]`，界面每 2 秒拿一次 `after=上次最大 seq` |
