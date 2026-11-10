@@ -4,12 +4,12 @@
 
 export const DEFAULT_TEST_URL = 'https://www.gstatic.com/generate_204';
 
-// [地址, 名字]
+// [地址, 名字]：与 iOS / macOS 客户端「代理与测速」的预设同一组，全是 https（http 地址在被劫持的网络里会测出假延迟）
 export const TEST_URL_PRESETS = [
-    ['https://www.gstatic.com/generate_204', 'Google'],
     ['https://cp.cloudflare.com/generate_204', 'Cloudflare'],
-    ['http://captive.apple.com', 'Apple'],
-    ['http://connect.rom.miui.com/generate_204', '小米'],
+    ['https://www.gstatic.com/generate_204', 'Google'],
+    ['https://connectivitycheck.gstatic.com/generate_204', 'Google 连通性检查'],
+    ['https://captive.apple.com/hotspot-detect.html', 'Apple'],
 ];
 
 // 实际用哪个地址测：setting = 设置里的 test_url，groupUrl = 组的 testUrl
