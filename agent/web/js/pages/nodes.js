@@ -1,11 +1,11 @@
-// 节点：代理组（经内核 API），手动选择组可点选成员；单个节点与整组测延迟
+// 节点：代理组（经内核 API），手动选择组可点选成员；单个节点与整组测延迟（测速地址见 ../testurl.js）
 import { html, useState, useEffect } from '../lib.js';
 import { get, put, seg } from '../api.js';
-import { useStore, toast } from '../store.js';
-import { Card, Button } from '../ui.js';
+import { useStore, toast, saveSettings } from '../store.js';
+import { Card, Button, Select, TextInput, Dialog } from '../ui.js';
 import { delayClass, stripPeriod } from '../util.js';
+import { TEST_URL_PRESETS, effectiveTestUrl, testUrlChoice, checkTestUrl, lastDelay } from '../testurl.js';
 
-const DEFAULT_TEST_URL = 'https://www.gstatic.com/generate_204';
 const TIMEOUT = 5000;
 
 const typeNames = {
@@ -13,18 +13,63 @@ const typeNames = {
     Direct: '直连', Reject: '拒绝', RejectDrop: '拒绝', Pass: '跳过', Compatible: '兼容',
 };
 
-// 最近一次延迟：组写了测速地址的用该地址的记录，否则用通用记录。没测过 = null，0 = 超时 / 失败
-function lastDelay(proxy, testUrl) {
-    const hist = (testUrl && proxy?.extra?.[testUrl]?.history?.length ? proxy.extra[testUrl].history : proxy?.history) ?? [];
-    return hist.length ? hist[hist.length - 1].delay : null;
+// 测速地址：跟随订阅 / 预设 / 自定义（设置 test_url，存在 NAS 上）。改了就存、不重启内核
+function TestUrlPicker({ value, onSaved }) {
+    const [editing, setEditing] = useState(false);
+    const [text, setText] = useState('');
+    const [error, setError] = useState('');
+    const choice = testUrlChoice(value);
+    const save = async (url) => {
+        try {
+            await saveSettings((s) => { s.test_url = url; }, false);
+        } catch (err) {
+            toast(`保存失败：${stripPeriod(err.message)}`, 'warn');
+            return false;
+        }
+        onSaved(url);
+        return true;
+    };
+    const openCustom = () => {
+        setText(choice == 'custom' ? value : '');
+        setError('');
+        setEditing(true);
+    };
+    const pick = (v) => (v == 'custom' ? openCustom() : save(v));
+    const submit = async () => {
+        const r = checkTestUrl(text);
+        if (r.error) {
+            setError(r.error);
+            return;
+        }
+        if (await save(r.url)) {
+            setEditing(false);
+        }
+    };
+    const options = [['', '跟随订阅'], ...TEST_URL_PRESETS, ['custom', choice == 'custom' ? `自定义：${value}` : '自定义…']];
+    return html`<span class="inline testurl" title="跟随订阅：测某个组用这个组写的测速地址，没写的用内置默认（Google）；选了别的地址就一律用它">
+        <span class="muted">测速地址</span>
+        <${Select} value=${choice} onChange=${pick} options=${options} />
+        ${choice == 'custom' && html`<${Button} small onClick=${openCustom}>修改<//>`}
+        ${editing && html`<${Dialog} title="自定义测速地址" onClose=${() => setEditing(false)} actions=${html`
+            <${Button} onClick=${() => setEditing(false)}>取消<//>
+            <${Button} kind="primary" onClick=${submit}>保存<//>`}>
+            <p class="hint">测延迟时经节点访问这个地址、量第一次回应的时间。只接受 http:// 或 https:// 开头的网址，最好是回 204 的小页面。</p>
+            <form onSubmit=${(e) => { e.preventDefault(); submit(); }}>
+                <${TextInput} mono value=${text} placeholder="https://…/generate_204" autofocus
+                    class=${'input mono' + (error ? ' is-invalid' : '')} style="width:100%"
+                    onChange=${(v) => { setText(v); setError(''); }} />
+            </form>
+            ${error && html`<p class="error-text">${error}</p>`}
+        <//>`}
+    </span>`;
 }
 
-function Group({ group, proxies, open, onToggle, onReload, overrides, setOverride }) {
+function Group({ group, proxies, testSetting, open, onToggle, onReload, overrides, setOverride }) {
     const [testing, setTesting] = useState(false);
     const [busyNode, setBusyNode] = useState('');
-    const testUrl = group.testUrl || DEFAULT_TEST_URL;
+    const testUrl = effectiveTestUrl(testSetting, group.testUrl);
     const selectable = group.type == 'Selector';
-    const delayOf = (name) => (name in overrides ? overrides[name] : lastDelay(proxies[name], group.testUrl));
+    const delayOf = (name) => (name in overrides ? overrides[name] : lastDelay(proxies[name], testUrl));
 
     const pick = async (name) => {
         if (!selectable || name == group.now) {
@@ -103,11 +148,15 @@ export function Nodes({ active, go }) {
     const [error, setError] = useState('');
     const [open, setOpen] = useState({});
     const [overrides, setOverrides] = useState({});
+    const [testSetting, setTestSetting] = useState(null);   // 设置里的 test_url；null = 还没取到
 
     const load = async () => {
         try {
-            const [r, c] = await Promise.all([get('/core/proxies'), get('/core/configs').catch(() => null)]);
+            const [r, c, s] = await Promise.all([get('/core/proxies'), get('/core/configs').catch(() => null), get('/settings').catch(() => null)]);
             setData(r?.proxies ?? {});
+            if (s) {
+                setTestSetting(s.test_url ?? '');
+            }
             setOverrides({});   // 重新取到的记录里已经有刚测的结果
             setMode(String(c?.mode || '').toLowerCase());
             setError('');
@@ -155,12 +204,16 @@ export function Nodes({ active, go }) {
         <div class="toolbar" style="margin-bottom:12px">
             <span class="muted">${groups.length} 个代理组${mode ? ` · 当前${{ rule: '规则', global: '全局', direct: '直连' }[mode] || mode}模式` : ''}${mode == 'direct' ? '（直连模式下不走任何节点）' : ''}</span>
             <span style="flex:1"></span>
+            ${testSetting != null && html`<${TestUrlPicker} value=${testSetting} onSaved=${(url) => {
+        setTestSetting(url);
+        setOverrides({});   // 刚测的结果是旧地址的
+    }} />`}
             <${Button} small onClick=${() => setOpen(Object.fromEntries(groups.map((g) => [g.name, true])))}>全部展开<//>
             <${Button} small onClick=${() => setOpen({})}>全部收起<//>
             <${Button} small onClick=${load}>刷新<//>
         </div>
         ${groups.length == 0 && html`<${Card}><div class="empty">配置里没有代理组。</div><//>`}
-        ${groups.map((g) => html`<${Group} key=${g.name} group=${g} proxies=${data} open=${!!open[g.name]}
+        ${groups.map((g) => html`<${Group} key=${g.name} group=${g} proxies=${data} testSetting=${testSetting} open=${!!open[g.name]}
             onToggle=${() => setOpen((o) => ({ ...o, [g.name]: !o[g.name] }))} onReload=${reload}
             overrides=${overrides} setOverride=${setOverride} />`)}
     </div>`;

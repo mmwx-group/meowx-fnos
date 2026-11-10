@@ -151,6 +151,12 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &next) {
 		return
 	}
+	testURL, err := store.NormalizeTestURL(next.TestURL)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	next.TestURL = testURL
 	prev := s.App.Settings.Get()
 	saved, err := s.App.Settings.Update(func(cur *store.Settings) error {
 		*cur = next

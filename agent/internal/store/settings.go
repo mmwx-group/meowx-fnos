@@ -15,6 +15,7 @@ type Settings struct {
 	Profile         string `json:"profile"`           // 当前订阅档 ID
 	AutoUpdateHours int    `json:"auto_update_hours"` // 订阅自动更新间隔，0 = 不自动
 	TestProfile     bool   `json:"test_profile"`      // 启用新配置前先让内核试读一遍（坏配置不换上去）
+	TestURL         string `json:"test_url"`          // 节点页手动测延迟的地址；空 = 跟随订阅（见 NormalizeTestURL）
 
 	Mixin Mixin `json:"mixin"`
 	Proxy Proxy `json:"proxy"`
