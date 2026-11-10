@@ -20,7 +20,8 @@
   实测容器里 uid 0、看得到宿主网卡、能建 TUN、能开 netfilter netlink。
 - **镜像就地构建**：compose 带 `build:`（`FROM scratch` + `rootfs/` 里的静态程序，`pull_policy: build`），
   不连任何镜像仓库（飞牛配了 docker.fnnas.com 等加速，但我们用不着）。实测构建出的镜像 6.6MB。
-- fpk = tar.gz：`app.tgz`（应用目录，装到 `/vol<N>/@appcenter/meowx`，即 `TRIM_APPDEST`）+ `manifest` + `cmd/` + `config/` + `ui/` + 图标 + 端口说明 `meowx.sc`。
+- fpk = tar.gz：`app.tgz`（应用目录，装到 `/vol<N>/@appcenter/meowx`，即 `TRIM_APPDEST`）+ `manifest` + `cmd/` + `config/` + 图标 + 端口说明 `meowx.sc`。
+  桌面入口 `ui/` 要放在 app.tgz 里（`desktop_uidir` 相对应用目录）：0.1.4 以前放在安装包最外层，飞牛装完就丢掉、桌面上没有图标。
   数据目录 `TRIM_PKGVAR` = `/vol<N>/@appdata/meowx`，挂进容器 `/data`。安装：`appcenter-cli install-fpk <fpk> -v <卷号>`（root）。
 - 平台 `platform = x86 | arm`，不能写多个值：x86 与 arm 各出一个包。
 - **一键更新**（0.1.1 起）：appcenter-cli 没有保留数据的升级（`install-fpk` 拒绝已装的应用，`install-local` 是先卸载再装）。

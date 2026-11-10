@@ -2,7 +2,8 @@
 # 打飞牛安装包：scripts/build-fpk.sh <版本> [x86|arm]
 #
 # 产物 dist/meowx-fnos-<版本>-<平台>.fpk = tar.gz：
-#   app.tgz（应用目录：docker/{docker-compose.yaml,Dockerfile,rootfs/}）、manifest、cmd/、config/、ui/、图标、meowx.sc
+#   app.tgz（应用目录：docker/{docker-compose.yaml,Dockerfile,rootfs/}、ui/）、manifest、cmd/、config/、图标、meowx.sc
+# 桌面入口 ui/ 必须在应用目录里（manifest 的 desktop_uidir 相对应用目录）：放在安装包最外层时飞牛装完就丢掉，桌面上没有图标
 # 镜像由飞牛起容器时按 Dockerfile 就地构建（FROM scratch + rootfs 里的静态程序），不连镜像仓库。
 set -euo pipefail
 
@@ -43,10 +44,11 @@ else
     TAR_FLAGS=(--uid 0 --gid 0)
     tar --no-mac-metadata -cf /dev/null /dev/null 2>/dev/null && TAR_FLAGS+=(--no-xattrs --no-mac-metadata)
 fi
-tar -C "$WORK/target" "${TAR_FLAGS[@]}" -czf "$WORK/pkg/app.tgz" docker
+cp -R "$ROOT/fnos/ui" "$WORK/target/"
+tar -C "$WORK/target" "${TAR_FLAGS[@]}" -czf "$WORK/pkg/app.tgz" docker ui
 
 # 3. 安装包
-cp -R "$ROOT/fnos/cmd" "$ROOT/fnos/config" "$ROOT/fnos/ui" "$WORK/pkg/"
+cp -R "$ROOT/fnos/cmd" "$ROOT/fnos/config" "$WORK/pkg/"
 cp "$ROOT/fnos/meowx.sc" "$ROOT/fnos/ICON.PNG" "$ROOT/fnos/ICON_256.PNG" "$WORK/pkg/"
 if [ -n "$(ls -A "$ROOT/fnos/wizard" 2>/dev/null)" ]; then cp -R "$ROOT/fnos/wizard" "$WORK/pkg/"; fi
 CHECKSUM="$(md5 -q "$WORK/pkg/app.tgz" 2>/dev/null || md5sum "$WORK/pkg/app.tgz" | cut -d' ' -f1)"
