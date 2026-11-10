@@ -1,0 +1,54 @@
+# 草稿（不在 .github/workflows/ 里，不会跑）：通用 Docker 版的构建。镜像发布到哪个仓库、叫什么、凭据怎么放还没定，
+# 定了以后挪进 workflows/，按需要打开推送那一步。
+#
+# 现在做的：手动触发 → 在自建 runner 上出 amd64 / arm64 两个离线镜像（docker save 的 tar），传到 Actions 产物。
+# 公开仓库：同 build.yml，不接 pull_request（自建 runner 会执行 PR 里的任意代码）。
+name: docker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    runs-on: [self-hosted, lax]
+    timeout-minutes: 40
+    env:
+      MEOWX_CACHE: ${{ github.workspace }}/../../meowx-fnos-cache
+      GEO_REFRESH: '1'
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27'
+          cache: false
+
+      - name: version
+        id: version
+        run: echo "version=$(sed -n 's/^version *= *//p' fnos/manifest)" >> "$GITHUB_OUTPUT"
+
+      - name: test
+        run: (cd agent && go vet ./... && GOOS=linux go vet ./... && go test ./...)
+
+      - name: build
+        run: |
+          rm -rf dist
+          scripts/build-docker.sh "${{ steps.version.outputs.version }}" --tar
+          (cd dist && sha256sum *.tar)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: meowx-docker-${{ steps.version.outputs.version }}
+          path: dist/meowx-docker-*.tar
+          compression-level: 6
+
+      # 推镜像仓库（多架构清单）：仓库名与凭据定了再打开，例如
+      # - uses: docker/login-action@v3
+      #   with:
+      #     registry: ghcr.io
+      #     username: ${{ github.actor }}
+      #     password: ${{ secrets.GITHUB_TOKEN }}
+      # - run: scripts/build-docker.sh "${{ steps.version.outputs.version }}" --push ghcr.io/<owner>/<name>

@@ -85,6 +85,12 @@ fpk
 - 观感同 MeowX 品牌（奶白底、白卡、玫红 / 樱粉强调，跟随系统深浅色）。不引网页框架的话就用 Preact + htm（MIT，约 10KB，随包带，不连 CDN）。
 - 网页没有登录：飞牛自己的会话管不到我们的端口。第一版只听局域网，设置里可设访问密码（OpenWrt 版的 `authentication` 同理）。
 
+## 7½. 通用 Docker 版
+
+2026-11-10 起同一套控制服务另出一个通用 Docker 版（群晖 / 威联通 / 绿联等），见 [docker.md](docker.md)：
+`MEOWX_PLATFORM` 决定外壳（缺省 fnos，飞牛版行为不变），防火墙另有 iptables 后端（群晖没有 nf_tables / TPROXY / NETMAP），
+运行时探测、可用环境变量强制（`internal/fw`）。飞牛版的 fpk 照旧 `FROM scratch` 就地构建，不受影响。
+
 ## 8. 分期
 
 1. ✅ 骨架：fpk + 就地构建镜像 + 网页探测（2026-11-07 测试机通过）。
