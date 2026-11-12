@@ -1,4 +1,4 @@
-// meowx-agent：飞牛 NAS 版的控制服务（网页界面 + 管理内核 / 透明代理 / 喵窝），容器里的 PID 1。
+// meowx-agent：MeowX NAS 版（飞牛 fpk / 通用 Docker 版，见 internal/platform）的控制服务（网页界面 + 管理内核 / 透明代理 / 喵窝），容器里的 PID 1。
 package main
 
 import (
@@ -14,7 +14,9 @@ import (
 
 	"github.com/mmwx-group/meowx-fnos/agent/internal/api"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/app"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/fw"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/platform"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/update"
 )
 
@@ -36,10 +38,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	a.Log.Add("agent", "MeowX "+version+" 启动")
+	a.Log.Add("agent", "MeowX "+version+" 启动（"+platform.Current().Edition+"）")
+	a.Log.Add("agent", "防火墙："+fw.Detect().Describe())
 	// 检查更新 + 一键更新：MEOWX_HOST_DATA（数据目录在宿主上的路径）与应用中心的 socket 由 docker-compose 给
 	a.Update = &update.Updater{
-		Version: version, DataDir: a.DataDir,
+		Version: version, DataDir: a.DataDir, Platform: platform.Current(),
 		FeedURL:     os.Getenv("MEOWX_UPDATE_FEED"), // 只给测试用，缺省是 dl.miaomiaowux.com 的发布清单
 		Socket:      envOr("MEOWX_APPCENTER_SOCK", update.DefaultSocket),
 		HostDataDir: os.Getenv("MEOWX_HOST_DATA"),

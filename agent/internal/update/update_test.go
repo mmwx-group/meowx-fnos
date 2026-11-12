@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/mmwx-group/meowx-fnos/agent/internal/platform"
 )
 
 func TestNewer(t *testing.T) {
@@ -245,5 +247,40 @@ func TestCleanup(t *testing.T) {
 	(&Updater{DataDir: data}).Cleanup()
 	if _, err := os.Stat(filepath.Join(data, "update")); !os.IsNotExist(err) {
 		t.Fatalf("update dir still there: %v", err)
+	}
+}
+
+// 通用 Docker 版：读清单里 docker 一段，不一键更新、不碰应用中心接口，只告诉用户怎么换镜像
+func TestDockerEdition(t *testing.T) {
+	var ua string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ua = r.Header.Get("User-Agent")
+		fmt.Fprintf(w, `{"platforms":{"fnos":{"version":"9.9.9","files":[]},"docker":{"version":"0.2.0","image":"example/meowx:0.2.0","files":[
+			{"kind":"image-tar","arch":%q,"name":"m.tar","url":"http://x/m.tar","size":10,"sha256":"%s"}]}}}`, feedArch(), strings.Repeat("0", 64))
+	}))
+	defer srv.Close()
+	d := &fakeDaemon{installed: true, version: "0.2.0"}
+	sock := d.serve(t)
+	u := &Updater{Version: "0.1.5", Platform: platform.Parse("synology"), FeedURL: srv.URL + "/latest.json", Socket: sock,
+		DataDir: t.TempDir(), HostDataDir: "/h", Client: srv.Client()}
+	info := u.Check(context.Background(), false)
+	if info.Latest != "0.2.0" || !info.HasUpdate || info.CanInstall || !strings.Contains(info.Reason, "镜像") ||
+		info.Image != "example/meowx:0.2.0" || info.DownloadURL != "http://x/m.tar" {
+		t.Fatalf("check: %+v", info)
+	}
+	if ua != "MeowX/0.1.5 (Synology)" {
+		t.Fatalf("UA：%q", ua)
+	}
+	if _, err := u.Install(context.Background()); err == nil || !strings.Contains(err.Error(), "镜像") {
+		t.Fatalf("install: %v", err)
+	}
+	if len(d.calls) != 0 {
+		t.Fatalf("Docker 版不该碰应用中心：%v", d.calls)
+	}
+
+	// 清单里还没有 docker 一段
+	u.FeedURL = feedServer(t, "0.2.0", []byte("x")).URL + "/latest.json"
+	if info := u.Check(context.Background(), true); !strings.Contains(info.Error, "Docker 版") {
+		t.Fatalf("没有 docker 一段：%+v", info)
 	}
 }

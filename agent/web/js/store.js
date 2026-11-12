@@ -15,6 +15,9 @@ export const state = {
     upgrading: null,   // 一键更新已提交：{ version, at(毫秒) }，控制服务的版本号变成它就刷新页面
 };
 
+// 通用 Docker 版（群晖 / 威联通 / 绿联…）：不经飞牛应用中心，文案与更新入口不同
+export const isDocker = () => !!state.status?.platform && state.status.platform != 'fnos';
+
 const listeners = new Set();
 
 export function update(patch) {

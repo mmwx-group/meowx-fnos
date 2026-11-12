@@ -26,6 +26,9 @@
 
 **网页密码**：管理页面缺省不要密码，NAS 的 7899 端口会开放到外网时请在「设置」里设一个。
 
+**群晖 / 威联通 / 绿联等别的 NAS**：有通用 Docker 版（同一套程序，导入镜像后用 docker compose 起），
+安装步骤与限制见 [docs/docker.md](docs/docker.md)。还在第一阶段：没有发布镜像，要自己构建（`scripts/build-docker.sh`）。
+
 ## 从源码打包
 
 ```sh
@@ -36,7 +39,7 @@ scripts/build-fpk.sh <版本> [x86|arm]   # 产物在 dist/meowx-fnos-<版本>-<
 有补丁时打上 `patches/core/` 的补丁；喵窝用官方 tailscale 的静态程序（`scripts/fetch-tailscale.sh`，校验 sha256）。
 推 main 由 Actions 打包，打 `v*` tag 发布（tag 要与 `fnos/manifest` 的 version 一致）。
 
-设计见 [docs/design.md](docs/design.md)，控制服务的 API 见 [docs/api.md](docs/api.md)。
+设计见 [docs/design.md](docs/design.md)，控制服务的 API 见 [docs/api.md](docs/api.md)，通用 Docker 版见 [docs/docker.md](docs/docker.md)。
 
 ## 致谢与许可
 

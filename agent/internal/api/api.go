@@ -21,6 +21,7 @@ import (
 	"github.com/mmwx-group/meowx-fnos/agent/internal/app"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/core"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/platform"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 )
 
@@ -128,7 +129,8 @@ func (s *Server) status(w http.ResponseWriter, r *http.Request) {
 		c, err := r.Cookie(cookieName)
 		needLogin = err != nil || !hmac.Equal([]byte(c.Value), []byte(s.sessionToken(st.Web.Password)))
 	}
-	out := map[string]any{"version": s.App.Version, "need_login": needLogin}
+	pf := platform.Current()
+	out := map[string]any{"version": s.App.Version, "need_login": needLogin, "platform": pf.ID, "edition": pf.Edition}
 	if !needLogin {
 		out["enabled"] = st.Enabled
 		out["profile"] = st.Profile
@@ -427,7 +429,7 @@ func (s *Server) updateCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.App.Update.Check(ctx, r.URL.Query().Get("refresh") == "1"))
 }
 
-// POST /api/update：下载新版安装包、交给飞牛应用中心升级；回包之后应用中心会重启 MeowX。
+// POST /api/update：下载新版安装包、交给飞牛应用中心升级；回包之后应用中心会重启 MeowX。Docker 版一律回不能一键更新的原因。
 // 关掉网页不打断下载（不跟请求的 context）
 func (s *Server) updateInstall(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)

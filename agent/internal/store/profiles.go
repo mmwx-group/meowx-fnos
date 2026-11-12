@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mmwx-group/meowx-fnos/agent/internal/platform"
 	"gopkg.in/yaml.v3"
 )
 
@@ -210,7 +211,7 @@ func (s *ProfileStore) userAgent(p Profile) string {
 		return p.UserAgent
 	}
 	// 同客户端：mihomo/1.19.0 打头（主控与机场按它给完整的 Clash YAML），MeowX/<版本> (<系统>) 是官方客户端标记
-	return fmt.Sprintf("mihomo/1.19.0 MeowX/%s (fnOS)", s.Version)
+	return fmt.Sprintf("mihomo/1.19.0 MeowX/%s (%s)", s.Version, platform.Current().UAOS) // 飞牛版 (fnOS)
 }
 
 var userinfoRe = regexp.MustCompile(`(?i)(upload|download|total|expire)=(\d+)`)
