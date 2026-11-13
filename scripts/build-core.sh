@@ -3,12 +3,12 @@
 # meowx-core 按 CORE_REF 拉源码（缓存在 .cache/meowx-core，MEOWX_CACHE 可改；开发时可用 MEOWX_CORE_SRC 指向本地检出），有补丁时打上
 # patches/core/*.patch（-p3），tag 同 OpenWrt 版：喵窝用官方 tailscaled，内核不带 tailscale。
 # 以前的补丁 003–006（喵窝入网、GGY 设置存文件、账户订阅挂在订阅域名上）都已并进 meowx-core，现在没有补丁。
-# CORE_REF = meowx-core v0.4.9（带 AkileCDN 白名单子命令）。Actions 从 GitHub 拉源码，要指向已经推上去的提交。
+# CORE_REF = meowx-core 29aa32d（在 502c8b4 基础上多：白名单上报写日志 + po0 自定义服务器同地址不同 token 保留）。Actions 从 GitHub 拉源码，要指向已经推上去的提交。
 set -euo pipefail
 GOARCH="${1:?amd64 | arm64}"
 OUT="${2:?输出路径}"
 CORE_REPO="https://github.com/mmwx-group/meowx-core.git"
-CORE_REF="${CORE_REF:-502c8b4}"
+CORE_REF="${CORE_REF:-29aa32d}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${MEOWX_CACHE:-$ROOT/.cache}/meowx-core"
 
