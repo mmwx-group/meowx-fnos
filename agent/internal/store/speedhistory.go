@@ -62,6 +62,56 @@ func (h *SpeedHistory) Add(record json.RawMessage) ([]json.RawMessage, error) {
 	return list, WriteFileAtomic(h.path, data, 0o600)
 }
 
+// SetBoard 把 id 那条记录的测速榜状态（board 字段）换掉；board 为 null 时去掉这个字段。返回改过之后的全部记录。
+// 找不到这条（清空过、挤出去了）不算错，原样返回
+func (h *SpeedHistory) SetBoard(id string, board json.RawMessage) ([]json.RawMessage, error) {
+	if id == "" {
+		return nil, errors.New("缺少记录 id")
+	}
+	drop := len(board) == 0 || string(board) == "null"
+	if !drop {
+		var obj map[string]any
+		if json.Unmarshal(board, &obj) != nil {
+			return nil, errors.New("测速榜状态不是 JSON 对象")
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	list := h.loadLocked()
+	if list == nil {
+		list = []json.RawMessage{}
+	}
+	for i, raw := range list {
+		var rec map[string]json.RawMessage
+		if json.Unmarshal(raw, &rec) != nil {
+			continue
+		}
+		var recID string
+		if json.Unmarshal(rec["id"], &recID) != nil || recID != id {
+			continue
+		}
+		if drop {
+			delete(rec, "board")
+		} else {
+			rec["board"] = board
+		}
+		updated, err := json.Marshal(rec)
+		if err != nil {
+			return nil, err
+		}
+		if len(updated) > speedHistoryRecordMax {
+			return nil, errors.New("记录太大")
+		}
+		list[i] = updated
+		data, err := json.Marshal(list)
+		if err != nil {
+			return nil, err
+		}
+		return list, WriteFileAtomic(h.path, data, 0o600)
+	}
+	return list, nil
+}
+
 // Clear 清空
 func (h *SpeedHistory) Clear() error {
 	h.mu.Lock()

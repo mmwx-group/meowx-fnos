@@ -32,6 +32,7 @@ type App struct {
 	Mesh     *mesh.Manager
 	Update   *update.Updater
 	Speed    *store.SpeedHistory // 网页「网络测速」的记录
+	Board    *store.SpeedBoard   // 网页「网络测速」上传到测速榜的本机设置（同意与否、install_id）
 
 	applyMu   sync.Mutex
 	lastError string
@@ -57,6 +58,7 @@ func New(version, dataDir, coreBinary, tsBinDir, uiPath string) (*App, error) {
 		Version: version, DataDir: dataDir, UIPath: uiPath,
 		Settings: settings, Profiles: profiles, Log: log,
 		Speed: store.OpenSpeedHistory(filepath.Join(dataDir, "speedtest-history.json")),
+		Board: store.OpenSpeedBoard(filepath.Join(dataDir, "speedboard.json")),
 		Core: &core.Supervisor{
 			Paths: core.Paths{
 				Binary:  coreBinary,

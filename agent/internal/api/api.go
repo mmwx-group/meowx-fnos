@@ -14,6 +14,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"reflect"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/speedtest/history", s.speedHistory)
 	mux.HandleFunc("POST /api/speedtest/history", s.speedHistoryAdd)
 	mux.HandleFunc("DELETE /api/speedtest/history", s.speedHistoryClear)
+	mux.HandleFunc("PATCH /api/speedtest/history/{id}", s.speedHistoryBoard)
+	mux.HandleFunc("GET /api/speedtest/board", s.speedBoard)
+	mux.HandleFunc("PUT /api/speedtest/board", s.speedBoardSet)
+	mux.HandleFunc("POST /api/speedtest/board/reset", s.speedBoardReset)
+	mux.HandleFunc("POST /api/speedtest/grant", s.speedGrant)
 	mux.HandleFunc("GET /api/logs", s.logs)
 	mux.HandleFunc("DELETE /api/logs", s.clearLogs)
 
@@ -769,6 +775,85 @@ func (s *Server) speedHistoryAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]any{"records": list})
+}
+
+// PATCH /api/speedtest/history/{id} {"board": {…} | null}：上传 / 删除之后把这条记录的测速榜状态写回，回全部记录
+func (s *Server) speedHistoryBoard(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Board json.RawMessage `json:"board"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	list, err := s.App.Speed.SetBoard(r.PathValue("id"), body.Board)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, map[string]any{"records": list})
+}
+
+// ---------- 测速榜（规格 miaomiaowuC/Design/speedtest-board.md §6；上传本身经 /api/core/meowx/speedtest/board 走内核） ----------
+
+func writeSpeedBoard(w http.ResponseWriter, st store.SpeedBoardState, err error) {
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, map[string]any{"asked": st.Upload != nil, "upload": st.Upload != nil && *st.Upload, "install_id": st.InstallID})
+}
+
+// GET /api/speedtest/board：{asked, upload, install_id}
+func (s *Server) speedBoard(w http.ResponseWriter, r *http.Request) {
+	st, err := s.App.Board.Get()
+	writeSpeedBoard(w, st, err)
+}
+
+// PUT /api/speedtest/board {"upload": bool}
+func (s *Server) speedBoardSet(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Upload bool `json:"upload"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	st, err := s.App.Board.SetUpload(body.Upload)
+	writeSpeedBoard(w, st, err)
+}
+
+// POST /api/speedtest/board/reset：换一个 install_id
+func (s *Server) speedBoardReset(w http.ResponseWriter, r *http.Request) {
+	st, err := s.App.Board.Reset()
+	writeSpeedBoard(w, st, err)
+}
+
+var payloadHashPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+// POST /api/speedtest/grant {"payload_hash"}：登录了主控账户时经 meowx-core 向主控要一张绑定上传正文 sha256 的一次性凭证。
+// 回 {"grant": "…"}；没登录、内核旧、主控不给都回 {"grant": ""}，网页就匿名传
+func (s *Server) speedGrant(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		PayloadHash string `json:"payload_hash"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	if !payloadHashPattern.MatchString(body.PayloadHash) {
+		writeErr(w, http.StatusBadRequest, errors.New("payload_hash 无效"))
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	grant := ""
+	if out, err := s.App.Core.Panel(ctx, "speedtest-grant", body.PayloadHash); err == nil {
+		var res struct {
+			Grant string `json:"grant"`
+		}
+		if json.Unmarshal(out, &res) == nil {
+			grant = res.Grant
+		}
+	}
+	writeJSON(w, map[string]any{"grant": grant})
 }
 
 func (s *Server) speedHistoryClear(w http.ResponseWriter, r *http.Request) {

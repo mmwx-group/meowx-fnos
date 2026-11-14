@@ -2232,3 +2232,79 @@ code,
     flex: 1 0 auto;
     padding: 0 10px;
 }
+
+/* 测速榜：码表下面这一次的结果、测速记录每一行下面一行（超越比例 + 结果页 / 复制链接 / 删除，或失败原因 + 重试） */
+.speed-board {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+}
+
+.speed__left > .speed-board {
+    padding: 0 4px;
+}
+
+.speed-hist {
+    flex-wrap: wrap;
+}
+
+.speed-hist .speed-board {
+    flex: 1 1 100%;
+    padding-top: 8px;
+    border-top: 1px dashed var(--stroke);
+}
+
+.speed-board__text {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.speed-board__pct {
+    color: var(--rose);
+    font-size: 14px;
+    font-weight: 750;
+}
+
+.speed-board__note {
+    color: var(--t2);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+
+.speed-board__note.error-text {
+    flex: 1 1 auto;
+    color: var(--slow);
+    font-weight: 600;
+}
+
+.speed-board__actions {
+    display: flex;
+    flex: none;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.speed-board__actions a.btn {
+    text-decoration: none;
+}
+
+.speed-board__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.speed__settings .speed-board__actions {
+    margin-top: 10px;
+}
+
+.speed-board__consent p {
+    margin: 0 0 10px;
+    color: var(--t2);
+    font-size: 13.5px;
+    line-height: 1.6;
+}

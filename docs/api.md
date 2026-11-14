@@ -20,6 +20,11 @@
 | GET | `/api/speedtest/history` | 网络测速记录 `{records: [...]}`（新的在前，最多 50 条；每条的内容由网页定）。测速本身经 `/api/core/meowx/speedtest`（内核的测速接口：GET 进度、POST `start` / `stop`）|
 | POST | `/api/speedtest/history` | 记一条（JSON 对象，至多 4KB），回全部记录 |
 | DELETE | `/api/speedtest/history` | 清空测速记录 |
+| PATCH | `/api/speedtest/history/{id}` | `{board: {…} | null}`：把这条记录（按记录里的 `id`）的测速榜状态写回 / 去掉，回全部记录 |
+| GET | `/api/speedtest/board` | 测速榜设置 `{asked, upload, install_id}`（同意与否、本机随机身份，存 `/data/speedboard.json`）。上传本身经 `/api/core/meowx/speedtest/board`（内核经测速用的同一个出站发） |
+| PUT | `/api/speedtest/board` | `{upload: bool}` 记下同意 / 不同意 |
+| POST | `/api/speedtest/board/reset` | 换一个 install_id |
+| POST | `/api/speedtest/grant` | `{payload_hash}`：登录了主控账户时经 `meowx-core panel speedtest-grant` 要上传凭证，回 `{grant}`（拿不到为空串，网页就匿名传） |
 | GET | `/api/update[?refresh=1]` | 检查新版本（`dl.miaomiaowux.com/meowx/latest.json` 的 `platforms.fnos`，Docker 版读 `platforms.docker`，缓存一小时）：`{current, latest, has_update, released_at, notes_url, download_url, size, image, can_install, reason, updating, last_error, error, checked_at}`；`can_install` 为假时 `reason` 说原因、界面给 `download_url` 让用户手动安装。Docker 版 `can_install` 一律为假，`image` 是清单里的镜像名、`download_url` 是离线镜像 |
 | POST | `/api/update` | 一键更新（只有飞牛版）：下载新版安装包、校验 sha256、交给飞牛应用中心升级（`/rpc/v1` 的暂存 + update 任务），回 `{ok, version}`；之后应用中心停掉 MeowX、换上新版再启动，界面看 `/api/status` 的 `version` 变了就刷新 |
 
