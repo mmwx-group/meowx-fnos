@@ -7,7 +7,7 @@ import { get, post, put, patch, del, seg } from '../api.js';
 import { useStore, toast } from '../store.js';
 import { Card, Button, Segmented, Select, Switch, Dialog } from '../ui.js';
 import { stripPeriod, relativeTime } from '../util.js';
-import { BOARD_PAGE, blocker, copyText, deleteRecord, downsample, protocolCode, uploadRecord } from '../speedboard.js';
+import { BOARD_PAGE, blocker, boardSamples, copyText, deleteRecord, protocolCode, uploadRecord } from '../speedboard.js';
 
 const DIRECT = 'DIRECT';
 const SOURCES = [['google', 'Google'], ['microsoft', 'Microsoft'], ['apple', 'Apple'], ['speedtest', 'Speedtest'], ['cloudflare', 'Cloudflare']];
@@ -225,13 +225,13 @@ export function SpeedTest({ active, go }) {
         lastRun.current = prog.runID;
         const done = prog.phase == 'done';
         const info = runInfo.current ?? { multi, protocol: null };
-        // 采样压到 40 个点（详情与上传正文都够用），出口不记 IP
+        // 采样去掉前 2 秒、压到 40 个点（同平均速率的口径，见 boardSamples），出口不记 IP
         const record = {
             id: `${Date.now().toString(16)}-${Math.floor(Math.random() * 0xffffffff).toString(16)}`,
             at: Math.floor(Date.now() / 1000), via: prog.via, source: prog.source, server: prog.server || '',
             multi: info.multi, protocol: info.protocol, latency_ms: prog.latencyMs ?? null, download_mbps: prog.downloadMbps ?? null, upload_mbps: prog.uploadMbps ?? null,
             down_peak: prog.downloadPeakMbps ?? null, up_peak: prog.uploadPeakMbps ?? null,
-            down_samples: downsample(prog.downloadSamples ?? []), up_samples: downsample(prog.uploadSamples ?? []),
+            down_samples: boardSamples(prog.downloadSamples ?? []), up_samples: boardSamples(prog.uploadSamples ?? []),
             duration_ms: done ? (prog.durationMs ?? null) : null,
             bytes: prog.bytesUsed || 0, error: done ? '' : (prog.error || '测速失败'),
             exit: prog.exit ? [prog.exit.org, prog.exit.country].filter(Boolean).join(' · ') : '',
