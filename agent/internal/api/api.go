@@ -10,6 +10,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -52,6 +53,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /api/speedtest/board", s.speedBoardSet)
 	mux.HandleFunc("POST /api/speedtest/board/reset", s.speedBoardReset)
 	mux.HandleFunc("POST /api/speedtest/grant", s.speedGrant)
+	mux.HandleFunc("POST /api/internal/subscription-changed/{token}", s.subscriptionChanged)
 	mux.HandleFunc("GET /api/logs", s.logs)
 	mux.HandleFunc("DELETE /api/logs", s.clearLogs)
 
@@ -97,7 +99,9 @@ func (s *Server) sessionToken(password string) string {
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		pw := s.App.Settings.Get().Web.Password
-		if pw == "" || !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/login" || r.URL.Path == "/api/status" {
+		// /api/internal/ 是内核的回调：不走网页密码，由处理函数自己认回环来源 + 地址里的随机凭证
+		if pw == "" || !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/login" || r.URL.Path == "/api/status" ||
+			strings.HasPrefix(r.URL.Path, "/api/internal/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -293,6 +297,7 @@ func (s *Server) addProfile(w http.ResponseWriter, r *http.Request) {
 
 // 新加的订阅：要求「用它」或还没有在用的订阅时直接切过去（同客户端：导入即切过去）
 func (s *Server) afterAdd(w http.ResponseWriter, r *http.Request, p store.Profile, use bool) {
+	s.App.KickRealtime() // 新订阅可能带来没登录主控的只读通道
 	if use || s.App.Settings.Get().Profile == "" {
 		if err := s.switchTo(r.Context(), p.ID); err != nil {
 			writeJSON(w, map[string]any{"profile": p, "error": err.Error()})
@@ -366,6 +371,7 @@ func (s *Server) deleteProfile(w http.ResponseWriter, r *http.Request) {
 		})
 		_ = s.App.Apply(r.Context())
 	}
+	s.App.KickRealtime()
 	writeJSON(w, map[string]any{"ok": true})
 }
 
@@ -379,6 +385,7 @@ func (s *Server) updateProfile(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]any{"profile": p, "error": err.Error()})
 		return
 	}
+	s.App.KickRealtime() // 订阅 rev、只读凭证可能变了
 	st := s.App.Settings.Get()
 	if st.Enabled && st.Profile == id {
 		if err := s.App.Apply(ctx); err != nil {
@@ -505,6 +512,8 @@ func (s *Server) panelLogin(w http.ResponseWriter, r *http.Request) {
 	} else if p != nil {
 		resp["imported"] = p
 	}
+	// 主控实时通道跟着账号走：登录后用登录态连
+	s.App.KickRealtime()
 	// 登录后顺手拉主控下发的 po0 列表、补报一次白名单（同 OpenWrt 版）
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -554,6 +563,13 @@ func (s *Server) panelProfile(w http.ResponseWriter, r *http.Request) {
 
 // 退出登录：删掉从这个主控导入的订阅（同客户端；在用的那份删掉后停内核）
 func (s *Server) panelLogout(w http.ResponseWriter, r *http.Request) {
+	// 这个主控推来的入口覆盖跟着账号清掉（先记下主控地址，退出后就读不到了）
+	var status struct {
+		Base string `json:"base"`
+	}
+	if out, err := s.App.Core.Panel(r.Context(), "status"); err == nil {
+		_ = json.Unmarshal(out, &status)
+	}
 	if _, err := s.App.Core.Panel(r.Context(), "logout"); err != nil {
 		writeErr(w, http.StatusBadGateway, err)
 		return
@@ -573,6 +589,28 @@ func (s *Server) panelLogout(w http.ResponseWriter, r *http.Request) {
 		})
 		_ = s.App.Apply(r.Context())
 	}
+	s.App.ClearRealtimeEntries(r.Context(), status.Base)
+	s.App.KickRealtime()
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// POST /api/internal/subscription-changed/{token} {"key","rev","base"}：内核收到主控的订阅变更后回调（只认本机回环来源 +
+// 控制服务启动时生成、交给内核的随机凭证）。马上回、后台重拉
+func (s *Server) subscriptionChanged(w http.ResponseWriter, r *http.Request) {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() || !s.App.RealtimeHookTokenOK(r.PathValue("token")) {
+		writeErr(w, http.StatusForbidden, errors.New("forbidden"))
+		return
+	}
+	var body struct {
+		Key  string `json:"key"`
+		Rev  string `json:"rev"`
+		Base string `json:"base"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	go s.App.OnSubscriptionChanged(body.Base, body.Key, body.Rev)
 	writeJSON(w, map[string]any{"ok": true})
 }
 

@@ -38,6 +38,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	a.UIPort = envOr("MEOWX_UI_PORT", "7899")
 	a.Log.Add("agent", "MeowX "+version+" 启动（"+platform.Current().Edition+"）")
 	a.Log.Add("agent", "防火墙："+fw.Detect().Describe())
 	// 检查更新 + 一键更新：MEOWX_HOST_DATA（数据目录在宿主上的路径）与应用中心的 socket 由 docker-compose 给

@@ -38,6 +38,20 @@ type Profile struct {
 	Total          int64  `json:"total,omitempty"`
 	Expire         int64  `json:"expire,omitempty"`
 	Error          string `json:"error,omitempty"` // 上次更新失败的原因（旧副本保留）
+
+	// 主控给官方客户端的订阅键、内容指纹、实时通道地址与只读凭证（应答头 mmwx-sub-key / mmwx-sub-rev / mmwx-realtime-url /
+	// mmwx-realtime，规格 miaomiaowuC/Design/entry-realtime.md §2.3 / §3.2）。每次下载按应答头存，没有就清空（别家机场、旧主控）
+	SubKey      string `json:"sub_key,omitempty"`
+	SubRev      string `json:"sub_rev,omitempty"`
+	RealtimeURL string `json:"realtime_url,omitempty"`
+	Realtime    string `json:"realtime,omitempty"`
+}
+
+type pushRefreshKey struct{}
+
+// WithPushRefresh：主控推订阅变更触发的重拉。下载时带请求头 mmwx-refresh: push，主控据此不发「订阅已拉取」通知、短链限速不计数
+func WithPushRefresh(ctx context.Context) context.Context {
+	return context.WithValue(ctx, pushRefreshKey{}, true)
 }
 
 // ProfileStore：/data/profiles/index.json + <id>.yaml
@@ -222,6 +236,9 @@ func (s *ProfileStore) fetch(ctx context.Context, url, ua string) ([]byte, http.
 		return nil, nil, err
 	}
 	req.Header.Set("User-Agent", ua)
+	if push, _ := ctx.Value(pushRefreshKey{}).(bool); push {
+		req.Header.Set("mmwx-refresh", "push")
+	}
 	resp, err := s.Client.Do(req)
 	if err != nil {
 		return nil, nil, err
@@ -284,6 +301,10 @@ func (s *ProfileStore) download(ctx context.Context, p *Profile) error {
 	if n, err := strconv.Atoi(strings.TrimSpace(header.Get("Profile-Update-Interval"))); err == nil {
 		p.UpdateInterval = n
 	}
+	p.SubKey = strings.TrimSpace(header.Get("Mmwx-Sub-Key"))
+	p.SubRev = strings.TrimSpace(header.Get("Mmwx-Sub-Rev"))
+	p.RealtimeURL = strings.TrimSpace(header.Get("Mmwx-Realtime-Url"))
+	p.Realtime = strings.TrimSpace(header.Get("Mmwx-Realtime"))
 	p.UpdatedAt = time.Now().Unix()
 	p.Error = ""
 	return nil

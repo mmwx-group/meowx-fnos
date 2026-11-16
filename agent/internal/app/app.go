@@ -45,6 +45,9 @@ type App struct {
 	trialMu    sync.Mutex
 	trialTimer *time.Timer
 
+	UIPort string        // 网页 / 接口端口（内核的订阅变更回调打到这里），空 = 7899
+	rt     realtimeState // 主控实时通道（realtime.go）
+
 	// 绕过节点服务器地址：上一轮经内核解析出来的节点地址（含配置里直接写的 IP），下发透明代理时一并排除
 	psMu      sync.Mutex
 	ps4, ps6  []string
@@ -232,6 +235,8 @@ func (a *App) applyLocked(ctx context.Context) error {
 	if err := a.Core.Start(ctx); err != nil {
 		return err
 	}
+	// 主控实时通道：内核每次起来都要重新交给它（内核里只有落盘的覆盖表与订阅 rev，通道配置不落盘）
+	a.KickRealtime()
 	if err := a.applyHijackLocked(s, hijack.Discover(), false); err != nil {
 		return err
 	}
