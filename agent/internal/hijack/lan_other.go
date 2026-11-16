@@ -15,3 +15,5 @@ func RefreshLAN() {}
 func ApplyHost(HostPlan) error { return errors.New("只在 Linux 上可用") }
 
 func CleanupHost() {}
+
+func ApplyServerRoutes(ip4, ip6 []string) error { return nil }

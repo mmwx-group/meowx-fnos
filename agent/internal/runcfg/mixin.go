@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/mmwx-group/meowx-fnos/agent/internal/proxyserver"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 	"gopkg.in/yaml.v3"
 )
@@ -26,6 +27,14 @@ type Inputs struct {
 	ExtraFakeIPFilter []string // 喵窝：主控 / 中继的域名（fake-ip 下要拿真实地址）
 	RoutingMark       int
 	NoAAAA            bool // DNS 不回 IPv6 地址
+	// 绕过节点服务器地址（nil = 不绕过）：节点的 IP 写进 TUN 的 route-exclude-address，fake-ip 黑名单模式下节点域名并进 fake-ip-filter
+	ProxyServers *ProxyServers
+}
+
+// ProxyServers：绕过节点服务器地址要的东西（节点从最终的运行配置里收，proxy-provider 的缓存文件按 Home 找）
+type ProxyServers struct {
+	Home  string   // 内核数据目录
+	Known []string // 上一轮经内核解析出来的地址（域名节点的），一并写进 route-exclude-address
 }
 
 // Build 生成运行配置
@@ -112,6 +121,9 @@ func Build(profile []byte, in Inputs) ([]byte, error) {
 		}
 		dns["ipv6"] = false
 	}
+	if in.ProxyServers != nil {
+		applyProxyServers(cfg, in.ProxyServers)
+	}
 	if len(in.ExtraFakeIPFilter) > 0 {
 		dns, _ := cfg["dns"].(map[string]any)
 		if dns == nil {
@@ -125,6 +137,43 @@ func Build(profile []byte, in Inputs) ([]byte, error) {
 		dns["fake-ip-filter"] = list
 	}
 	return yaml.Marshal(cfg)
+}
+
+// applyProxyServers：节点的 IP（与上一轮解析出来的）写进 TUN 的 route-exclude-address——NAS 本机 / 容器连节点不进 TUN，
+// Redirect 模式（auto-redirect 按这张表放行）也靠它；内核起来以后新解析出来的另由策略路由补上（hijack.ApplyServerRoutes）。
+// 不代理 IPv6（排除了 ::/0）时不写 IPv6 地址。再把节点域名并进 fake-ip-filter（只在黑名单模式）
+func applyProxyServers(cfg map[string]any, ps *ProxyServers) {
+	ip4, ip6, domains := proxyserver.Classify(proxyserver.Collect(cfg, ps.Home))
+	k4, k6, _ := proxyserver.Classify(ps.Known)
+	if tun, _ := cfg["tun"].(map[string]any); tun != nil {
+		if exclude, ok := tun["route-exclude-address"].([]any); ok {
+			seen := map[string]bool{}
+			v6 := true
+			for _, x := range exclude {
+				s, _ := x.(string)
+				seen[s] = true
+				if s == "::/0" {
+					v6 = false
+				}
+			}
+			add := func(cidr string) {
+				if !seen[cidr] {
+					seen[cidr] = true
+					exclude = append(exclude, cidr)
+				}
+			}
+			for _, ip := range append(ip4, k4...) {
+				add(ip + "/32")
+			}
+			if v6 {
+				for _, ip := range append(ip6, k6...) {
+					add(ip + "/128")
+				}
+			}
+			tun["route-exclude-address"] = exclude
+		}
+	}
+	proxyserver.PatchFakeIPFilter(cfg, domains)
 }
 
 func buildMixin(in Inputs) map[string]any {

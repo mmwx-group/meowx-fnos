@@ -45,3 +45,33 @@ func TestTUNExcludesLANAndBridges(t *testing.T) {
 		t.Fatalf("旁路由计划不对：%+v", plan)
 	}
 }
+
+// 绕过节点服务器地址在本机 TUN 这条路上：只有开着本机 / 容器透明代理、有策略路由时才加；不代理 IPv6 时不加 v6
+func TestServerRoutes(t *testing.T) {
+	s := store.Defaults()
+	s.Proxy.Enabled = true
+	ip4, ip6 := []string{"1.2.3.4"}, []string{"2001:db8::1"}
+	v4, v6 := ServerRoutes(s, Host{}, ip4, ip6)
+	if len(v4) != 1 || v6 != nil {
+		t.Fatalf("v6 off: %v %v", v4, v6)
+	}
+	s.Proxy.IPv6 = true
+	if v4, v6 = ServerRoutes(s, Host{}, ip4, ip6); len(v4) != 1 || len(v6) != 1 {
+		t.Fatalf("v6 on: %v %v", v4, v6)
+	}
+	off := s
+	off.Proxy.BypassProxyServer = false
+	if v4, v6 = ServerRoutes(off, Host{}, ip4, ip6); v4 != nil || v6 != nil {
+		t.Fatal("bypass off")
+	}
+	lanOnly := s
+	lanOnly.Proxy.HostProxy, lanOnly.Proxy.ContainerProxy, lanOnly.Proxy.LANProxy = false, false, true
+	if v4, _ = ServerRoutes(lanOnly, Host{}, ip4, ip6); v4 != nil {
+		t.Fatal("no host TUN")
+	}
+	noPR := Host{}
+	noPR.Firewall.NoPolicyRouting = true
+	if v4, _ = ServerRoutes(s, noPR, ip4, ip6); v4 != nil {
+		t.Fatal("no policy routing")
+	}
+}

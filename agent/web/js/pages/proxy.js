@@ -110,6 +110,7 @@ export function ProxyPage({ active }) {
         <${Card} title="DNS 与绕过" i=${4}>
             <${Field} label="DNS 劫持" desc="把 DNS 查询交给内核的 DNS（Fake-IP 要靠它）">${onOff('dns_hijack', 'DNS 劫持')}<//>
             ${v('dns_hijack') && lan && !mixin.dns_enabled && html`<p class="error-text" style="margin:0 0 6px">「混入设置 › DNS」没启用，旁路由的 DNS 不会被劫持。</p>`}
+            <${Field} label="绕过节点服务器地址" desc="订阅里各节点的服务器地址不走透明代理：局域网设备或 NAS 上的应用自己也开着代理客户端时，它连节点的流量不会被 NAS 再代理一层。节点是域名的由内核解析，每 30 分钟刷新。">${onOff('bypass_proxy_server', '绕过节点服务器地址')}<//>
             <${Field} label="IPv4 保留地址" desc="发往这些地址的不代理（局域网、Docker 网段、组网段等）。NAS 网卡所在的网段总是直连。一行一个。" wide top>
                 <${ListInput} ...${b('reserved_ip')} rows=${4} />
             <//>

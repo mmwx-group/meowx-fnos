@@ -68,6 +68,10 @@ fpk
   飞牛自带的策略路由 `from <NAS 地址> lookup route_<网卡>`（优先级 10）让「NAS 回外网访问者的包」走原路，不会被 TUN 吸走——要实测。
 - **方案 B（A 不行时）**：照 `hijack.ut` 用 nftables（TPROXY / redirect + 策略路由 + fwmark 放行内核自己），
   用 Go 的 netlink 库（google/nftables，Apache-2.0）下发；内核的出站打 `routing-mark` 放行（OpenWrt 版用 cgroup，容器里不好用）。
+- **绕过节点服务器地址**（同 OpenWrt 版，缺省开）：订阅里各节点的服务器地址不走透明代理（设备自己也开着代理客户端时不被再代理一层）。
+  节点 IP 写进 TUN 的 `route-exclude-address`，内核起来后经 `/dns/query` 解析节点域名（每 30 分钟刷新），新地址用策略路由
+  `to <节点> lookup main`（优先级 8998，在内核的 9000 前面）补上，旁路由与 REDIRECT 退化时并进不代理的地址；fake-ip 黑名单模式下
+  节点域名并进 `fake-ip-filter`。代码在 `internal/proxyserver`、`app.refreshProxyServers`。
 - **安全阀**：开透明代理时 agent 先记好要撤的东西，规则生效后 N 分钟内没在网页上点「保留」就自动撤掉（防止把 SSH / 网页都断了）；
   agent 退出（容器停、卸载）时一律撤掉。
 

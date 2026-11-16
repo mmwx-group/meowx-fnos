@@ -120,11 +120,13 @@ type Proxy struct {
 	DNSHijack      bool     `json:"dns_hijack"`
 	IPv6           bool     `json:"ipv6"`
 	BypassChinaIP  bool     `json:"bypass_china_ip"`
-	ReservedIP     []string `json:"reserved_ip"`
-	ReservedIP6    []string `json:"reserved_ip6"`
-	ProxyTCPPorts  string   `json:"proxy_tcp_ports"`
-	ProxyUDPPorts  string   `json:"proxy_udp_ports"`
-	KeepMinutes    int      `json:"keep_minutes"` // 安全阀：开启后几分钟内没确认就自动撤掉
+	// 绕过节点服务器地址（同 OpenWrt 版，缺省开）：订阅里各节点的服务器地址不进透明代理（设备自己也开着代理客户端时不被再代理一层）
+	BypassProxyServer bool     `json:"bypass_proxy_server"`
+	ReservedIP        []string `json:"reserved_ip"`
+	ReservedIP6       []string `json:"reserved_ip6"`
+	ProxyTCPPorts     string   `json:"proxy_tcp_ports"`
+	ProxyUDPPorts     string   `json:"proxy_udp_ports"`
+	KeepMinutes       int      `json:"keep_minutes"` // 安全阀：开启后几分钟内没确认就自动撤掉
 }
 
 // Mesh：喵窝（同 OpenWrt 版的 mesh 段）
@@ -187,6 +189,8 @@ func Defaults() Settings {
 			HostProxy: true,
 			DNSHijack: true,
 			IPv6:      false,
+			// 老的 settings.json 里没有这个键：先铺缺省值再解，升级上来也是开着（同 OpenWrt 版 uci-defaults 补成 1）
+			BypassProxyServer: true,
 			ReservedIP: []string{
 				"0.0.0.0/8", "10.0.0.0/8", "127.0.0.0/8", "100.64.0.0/10", "169.254.0.0/16",
 				"172.16.0.0/12", "192.168.0.0/16", "224.0.0.0/4", "240.0.0.0/4",

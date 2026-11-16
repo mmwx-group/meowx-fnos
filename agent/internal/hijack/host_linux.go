@@ -24,7 +24,50 @@ import (
 const (
 	hostTable   = "meowx_host"
 	fakeRulePri = 8999
+	// 绕过节点服务器地址：发往节点的查主路由表、不进内核的 TUN（同样排在内核的规则 9000 前面）
+	serverRulePri = 8998
 )
+
+// ApplyServerRoutes：发往这些地址（节点服务器）的走主路由表，不进内核的 TUN。整套换掉
+func ApplyServerRoutes(ip4, ip6 []string) error {
+	cleanupServerRoutes()
+	for _, set := range []struct {
+		list   []string
+		family int
+		bits   int
+	}{{ip4, unix.AF_INET, 32}, {ip6, unix.AF_INET6, 128}} {
+		for _, s := range set.list {
+			ip := net.ParseIP(s)
+			if ip == nil {
+				continue
+			}
+			if set.bits == 32 {
+				ip = ip.To4()
+			}
+			rule := netlink.NewRule()
+			rule.Dst = &net.IPNet{IP: ip, Mask: net.CIDRMask(set.bits, set.bits)}
+			rule.Table, rule.Priority, rule.Family = unix.RT_TABLE_MAIN, serverRulePri, set.family
+			if err := netlink.RuleAdd(rule); err != nil {
+				cleanupServerRoutes()
+				return fmt.Errorf("加策略路由 %s：%w", s, err)
+			}
+		}
+	}
+	return nil
+}
+
+func cleanupServerRoutes() {
+	for _, family := range []int{unix.AF_INET, unix.AF_INET6} {
+		if rules, err := netlink.RuleList(family); err == nil {
+			for _, r := range rules {
+				if r.Priority == serverRulePri {
+					r := r
+					_ = netlink.RuleDel(&r)
+				}
+			}
+		}
+	}
+}
 
 func ApplyHost(p HostPlan) error {
 	CleanupHost()
@@ -82,6 +125,7 @@ func applyHostNFT(p HostPlan) error {
 
 func CleanupHost() {
 	cleanupIPT(hostChain)
+	cleanupServerRoutes()
 	if c, err := nftables.New(); err == nil {
 		if tables, err := c.ListTablesOfFamily(nftables.TableFamilyINet); err == nil {
 			for _, t := range tables {

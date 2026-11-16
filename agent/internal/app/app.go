@@ -10,15 +10,20 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mmwx-group/meowx-fnos/agent/internal/core"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/hijack"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/mesh"
+	"github.com/mmwx-group/meowx-fnos/agent/internal/proxyserver"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/runcfg"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/store"
 	"github.com/mmwx-group/meowx-fnos/agent/internal/update"
+	"gopkg.in/yaml.v3"
 )
 
 type App struct {
@@ -39,6 +44,12 @@ type App struct {
 
 	trialMu    sync.Mutex
 	trialTimer *time.Timer
+
+	// 绕过节点服务器地址：上一轮经内核解析出来的节点地址（含配置里直接写的 IP），下发透明代理时一并排除
+	psMu      sync.Mutex
+	ps4, ps6  []string
+	psAt      time.Time
+	psRunning atomic.Bool
 }
 
 const apiListen = "127.0.0.1:9090"
@@ -149,6 +160,7 @@ func (a *App) buildConfig(profile []byte) ([]byte, error) {
 		TUN:               hijack.TUN(s, hijack.Discover()),
 		ExtraFakeIPFilter: a.Mesh.Hosts(),
 		RoutingMark:       hijack.CoreMark,
+		ProxyServers:      a.proxyServersInput(s),
 		// 透明代理开着、不代理 IPv6：内核的 DNS 不回 AAAA，应用都走 IPv4（进 TUN / TPROXY）
 		NoAAAA: s.Proxy.Enabled && !s.Proxy.IPv6 && (s.Proxy.HostProxy || s.Proxy.LANProxy),
 	})
@@ -220,31 +232,169 @@ func (a *App) applyLocked(ctx context.Context) error {
 	if err := a.Core.Start(ctx); err != nil {
 		return err
 	}
-	host := hijack.Discover()
+	if err := a.applyHijackLocked(s, hijack.Discover(), false); err != nil {
+		return err
+	}
+	// 绕过节点服务器地址：等内核的控制接口通了解析节点域名，地址有变化再重新下发
+	if proxyServersActive(s) {
+		go a.refreshProxyServers(context.Background(), true)
+	}
+	return nil
+}
+
+// applyHijackLocked 下发透明代理（本机 DNS / fake-ip、本机 TUN 的节点绕过、旁路由）。quiet = 刷新节点地址时重新下发，不重复记日志
+func (a *App) applyHijackLocked(s store.Settings, host hijack.Host, quiet bool) error {
+	ip4, ip6 := a.knownProxyServers(s)
 	if plan := hijack.HostRules(s, host); plan != nil {
+		plan.Reserved = append(plan.Reserved, hostCIDRs(ip4)...)
 		if err := hijack.ApplyHost(*plan); err != nil {
 			return fmt.Errorf("本机 DNS / fake-ip 规则没下发成功：%w", err)
 		}
-		if plan.RedirPort != 0 {
+		if plan.RedirPort != 0 && !quiet {
 			a.Log.Add("agent", fmt.Sprintf("没有策略路由：NAS 本机 / 容器的 TCP 经 REDIRECT 交给 redir %d，UDP 不代理", plan.RedirPort))
+		}
+	}
+	// ApplyHost 先清掉了旧的：节点绕过的策略路由排在它后面下发
+	if v4, v6 := hijack.ServerRoutes(s, host, ip4, ip6); len(v4)+len(v6) > 0 {
+		if err := hijack.ApplyServerRoutes(v4, v6); err != nil {
+			return fmt.Errorf("绕过节点服务器地址的策略路由没下发成功：%w", err)
 		}
 	}
 	// 旁路由：内核的 tproxy 端口起来以后再把局域网设备的流量交过去
 	if plan := hijack.LAN(s, host); plan != nil {
+		plan.Reserved = append(plan.Reserved, hostCIDRs(ip4)...)
 		if err := hijack.ApplyLAN(*plan); err != nil {
 			return fmt.Errorf("旁路由规则没下发成功：%w", err)
 		}
-		if plan.RedirPort != 0 {
-			udp := "UDP 经 TUN " + plan.TUNDevice
-			if plan.TUNDevice == "" {
-				udp = "UDP 不代理（没有策略路由）"
+		if !quiet {
+			if plan.RedirPort != 0 {
+				udp := "UDP 经 TUN " + plan.TUNDevice
+				if plan.TUNDevice == "" {
+					udp = "UDP 不代理（没有策略路由）"
+				}
+				a.Log.Add("agent", fmt.Sprintf("旁路由已开（iptables）：%v → TCP 经 redir %d，%s", plan.Interfaces, plan.RedirPort, udp))
+			} else {
+				a.Log.Add("agent", fmt.Sprintf("旁路由已开：%v → tproxy %d", plan.Interfaces, plan.TProxyPort))
 			}
-			a.Log.Add("agent", fmt.Sprintf("旁路由已开（iptables）：%v → TCP 经 redir %d，%s", plan.Interfaces, plan.RedirPort, udp))
-		} else {
-			a.Log.Add("agent", fmt.Sprintf("旁路由已开：%v → tproxy %d", plan.Interfaces, plan.TProxyPort))
 		}
 	}
 	return nil
+}
+
+// proxyServersActive：绕过节点服务器地址这次用不用得上（开着透明代理、有要代理的流量）
+func proxyServersActive(s store.Settings) bool {
+	p := s.Proxy
+	return s.Enabled && p.Enabled && p.BypassProxyServer && (p.HostProxy || p.ContainerProxy || p.LANProxy)
+}
+
+// knownProxyServers：上一轮的节点地址（用不上时都是 nil）
+func (a *App) knownProxyServers(s store.Settings) (ip4, ip6 []string) {
+	if !proxyServersActive(s) {
+		return nil, nil
+	}
+	a.psMu.Lock()
+	defer a.psMu.Unlock()
+	return a.ps4, a.ps6
+}
+
+func (a *App) proxyServersInput(s store.Settings) *runcfg.ProxyServers {
+	if !proxyServersActive(s) {
+		return nil
+	}
+	ip4, ip6 := a.knownProxyServers(s)
+	return &runcfg.ProxyServers{Home: a.Core.Paths.HomeDir, Known: append(append([]string{}, ip4...), ip6...)}
+}
+
+func hostCIDRs(ips []string) []string {
+	out := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		out = append(out, ip+"/32")
+	}
+	return out
+}
+
+// refreshProxyServers：从运行配置里收齐节点的服务器地址，域名经内核的 /dns/query 解析（同 OpenWrt 版 proxy_server_cli.uc apply）；
+// 和上一轮不一样就重新下发透明代理。afterStart = 内核刚起来，等它的控制接口最多 30 秒，结果总记一行日志
+func (a *App) refreshProxyServers(ctx context.Context, afterStart bool) {
+	if !a.psRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer a.psRunning.Store(false)
+	if !proxyServersActive(a.Settings.Get()) || !a.Core.Status().Running {
+		return
+	}
+	data, err := os.ReadFile(a.Core.Paths.ConfigPath())
+	if err != nil {
+		return
+	}
+	cfg := map[string]any{}
+	if yaml.Unmarshal(data, &cfg) != nil {
+		return
+	}
+	servers := proxyserver.Collect(cfg, a.Core.Paths.HomeDir)
+	ip4, ip6, domains := proxyserver.Classify(servers)
+	note := ""
+	if len(domains) > 0 {
+		api := proxyserver.API{Base: "http://" + apiListen, Secret: a.Core.Secret}
+		wait := time.Duration(0)
+		if afterStart {
+			wait = 30 * time.Second
+		}
+		if !api.WaitReady(ctx, wait) {
+			// 解析不了就不动上一轮的（别把域名节点的地址丢掉）
+			a.Log.Add("agent", fmt.Sprintf("绕过节点服务器地址：内核的控制接口不通，%d 个域名这次没解析", len(domains)))
+			return
+		}
+		r4, r6, unresolved := api.Resolve(ctx, domains)
+		ip4 = dedupeStrings(append(ip4, r4...))
+		ip6 = dedupeStrings(append(ip6, r6...))
+		note = fmt.Sprintf("，%d 个域名", len(domains))
+		if len(unresolved) > 0 {
+			note += "，解析不出：" + strings.Join(unresolved, " ")
+		}
+	}
+
+	a.applyMu.Lock()
+	defer a.applyMu.Unlock()
+	s := a.Settings.Get()
+	if !proxyServersActive(s) || !a.Core.Status().Running {
+		return
+	}
+	a.psMu.Lock()
+	changed := !slices.Equal(a.ps4, ip4) || !slices.Equal(a.ps6, ip6)
+	a.ps4, a.ps6, a.psAt = ip4, ip6, time.Now()
+	a.psMu.Unlock()
+	if changed {
+		if err := a.applyHijackLocked(s, hijack.Discover(), true); err != nil {
+			a.Log.Add("agent", "绕过节点服务器地址：重新下发透明代理失败："+err.Error())
+			return
+		}
+	}
+	if changed || afterStart {
+		a.Log.Add("agent", fmt.Sprintf("绕过节点服务器地址：%d 个 IPv4 / %d 个 IPv6（%d 个节点%s）", len(ip4), len(ip6), len(servers), note))
+	}
+}
+
+// proxyServersDue：每 30 分钟重新解析一次节点域名（节点换了 IP、订阅更新过）
+func (a *App) proxyServersDue(now time.Time) bool {
+	if !proxyServersActive(a.Settings.Get()) || !a.Core.Status().Running {
+		return false
+	}
+	a.psMu.Lock()
+	defer a.psMu.Unlock()
+	return now.Sub(a.psAt) >= 30*time.Minute
+}
+
+func dedupeStrings(list []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, s := range list {
+		if !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // Shutdown：容器停止时（先撤旁路由，再停内核：内核退出时撤掉自己的 TUN 与路由；喵窝收掉 tailscaled 与防火墙）
@@ -267,6 +417,9 @@ func (a *App) Loop(ctx context.Context) {
 		case now := <-tick.C:
 			hijack.RefreshLAN() // iptables 后端：内核重启过的话补上 UDP 进 TUN 的路由
 			a.autoUpdate(ctx, now)
+			if a.proxyServersDue(now) {
+				go a.refreshProxyServers(ctx, false)
+			}
 			if a.reportDue(now, lastReport) {
 				lastReport = now
 				a.panelReport(ctx, true)

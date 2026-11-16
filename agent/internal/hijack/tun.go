@@ -213,6 +213,20 @@ func HostRules(s store.Settings, h Host) *HostPlan {
 	return plan
 }
 
+// ServerRoutes：绕过节点服务器地址在 NAS 本机 / 容器这条路（内核的 TUN，auto-route）上要加策略路由的目的地址；
+// 都是 nil = 用不上（没开、没有本机 TUN、没有策略路由——没有策略路由时本机走 REDIRECT，节点地址并进 HostPlan.Reserved）。
+// 不代理 IPv6 时整个 v6 都不进 TUN，不用加
+func ServerRoutes(s store.Settings, h Host, ip4, ip6 []string) (v4, v6 []string) {
+	p := s.Proxy
+	if !p.Enabled || !p.BypassProxyServer || !(p.HostProxy || p.ContainerProxy) || h.Firewall.NoPolicyRouting {
+		return nil, nil
+	}
+	if !p.IPv6 {
+		ip6 = nil
+	}
+	return ip4, ip6
+}
+
 // LAN 生成旁路由的规则计划；nil = 不开旁路由
 func LAN(s store.Settings, h Host) *LANPlan {
 	p := s.Proxy

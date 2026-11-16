@@ -127,3 +127,65 @@ func TestBadExtra(t *testing.T) {
 		t.Fatalf("写错的额外混入应当报错：%v", err)
 	}
 }
+
+// 绕过节点服务器地址：节点 IP（与上一轮解析出来的）写进 TUN 的 route-exclude-address；不代理 IPv6 时不写 v6；
+// fake-ip 黑名单模式下节点域名并进 fake-ip-filter（用户 DNS 设置是 redir-host 时不动）
+func TestProxyServers(t *testing.T) {
+	const profile = `
+dns: {enable: true, enhanced-mode: fake-ip, fake-ip-filter: ["+.lan"]}
+proxies:
+  - {name: a, type: ss, server: 1.2.3.4, port: 1, cipher: aes-128-gcm, password: x}
+  - {name: b, type: vless, server: HK.example.com, port: 2, uuid: u}
+  - {name: c, type: trojan, server: "2001:db8::10", port: 3, password: x}
+`
+	build := func(tun map[string]any, ps *ProxyServers) map[string]any {
+		t.Helper()
+		in := Inputs{Settings: store.Defaults(), TUN: tun, ProxyServers: ps}
+		out, err := Build([]byte(profile), in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cfg := map[string]any{}
+		if err := yaml.Unmarshal(out, &cfg); err != nil {
+			t.Fatal(err)
+		}
+		return cfg
+	}
+	exclude := func(cfg map[string]any) []string {
+		var out []string
+		for _, x := range cfg["tun"].(map[string]any)["route-exclude-address"].([]any) {
+			out = append(out, x.(string))
+		}
+		return out
+	}
+
+	cfg := build(map[string]any{"enable": true, "route-exclude-address": []any{"10.0.0.0/8"}}, &ProxyServers{Known: []string{"203.0.113.7", "2001:db8::7"}})
+	if got := strings.Join(exclude(cfg), " "); got != "10.0.0.0/8 1.2.3.4/32 203.0.113.7/32 2001:db8::10/128 2001:db8::7/128" {
+		t.Fatalf("exclude: %s", got)
+	}
+	hasNodeDomain := func(cfg map[string]any) bool {
+		for _, x := range cfg["dns"].(map[string]any)["fake-ip-filter"].([]any) {
+			if x == "hk.example.com" {
+				return true
+			}
+		}
+		return false
+	}
+	if cfg["dns"].(map[string]any)["enhanced-mode"] != "fake-ip" || !hasNodeDomain(cfg) {
+		t.Fatalf("fake-ip-filter: %v", cfg["dns"])
+	}
+
+	cfg = build(map[string]any{"enable": true, "route-exclude-address": []any{"::/0"}}, &ProxyServers{})
+	if got := strings.Join(exclude(cfg), " "); got != "::/0 1.2.3.4/32" {
+		t.Fatalf("no v6: %s", got)
+	}
+
+	// 关着（nil）：什么都不加
+	cfg = build(map[string]any{"enable": true, "route-exclude-address": []any{"10.0.0.0/8"}}, nil)
+	if got := strings.Join(exclude(cfg), " "); got != "10.0.0.0/8" {
+		t.Fatalf("off: %s", got)
+	}
+	if hasNodeDomain(cfg) {
+		t.Fatalf("off fake-ip-filter: %v", cfg["dns"])
+	}
+}
