@@ -251,11 +251,22 @@ func (s *ProfileStore) fetch(ctx context.Context, url, ua string) ([]byte, http.
 	return body, resp.Header, err
 }
 
+// fallbackUserAgent：订阅用官方 UA 拿到的不是 Clash 配置时再试一次的 UA。不少机场面板只认 UA 里带 clash 的客户端，
+// 认不出就回节点链接列表（V2Ray / Shadowrocket 格式）；FlClash 等客户端的 UA 里带 clash，所以同一个订阅在它们那里能导入
+const fallbackUserAgent = "clash.meta"
+
 func (s *ProfileStore) download(ctx context.Context, p *Profile) error {
 	ua := s.userAgent(*p)
 	body, header, err := s.fetch(ctx, p.URL, ua)
 	if err != nil {
 		return fmt.Errorf("下载失败：%w", err)
+	}
+	// 用的是缺省（官方）UA、拿到的又不是 Clash 配置：换 clash.meta 再拉一次，拿到 Clash 配置就用它。
+	// 主控订阅认得官方 UA，第一次就是 Clash 配置，不受影响；用户自己填了 UA 的照填的来，不替他换
+	if clashShape(body) != nil && (p.UserAgent == "" || p.UserAgent == "meowx") {
+		if b2, h2, err2 := s.fetch(ctx, p.URL, fallbackUserAgent); err2 == nil && clashShape(b2) == nil {
+			body, header = b2, h2
+		}
 	}
 	if err := s.check(ctx, body); err != nil {
 		return err
@@ -311,16 +322,49 @@ func (s *ProfileStore) download(ctx context.Context, p *Profile) error {
 }
 
 // check：proxies 是非空列表，或 proxy-providers 是非空映射（同 OpenWrt 版）；再交给内核试读
-func (s *ProfileStore) check(ctx context.Context, data []byte) error {
+// clashShape：proxies 是非空列表，或 proxy-providers 是非空映射（同 OpenWrt 版）
+func clashShape(data []byte) error {
 	var doc struct {
 		Proxies   []any          `yaml:"proxies"`
 		Providers map[string]any `yaml:"proxy-providers"`
 	}
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return errors.New("不是 Clash 的 YAML 配置")
-	}
-	if len(doc.Proxies) == 0 && len(doc.Providers) == 0 {
+	if err := yaml.Unmarshal(data, &doc); err != nil || (len(doc.Proxies) == 0 && len(doc.Providers) == 0) {
+		if looksLikeLinkList(data) {
+			return errors.New("订阅返回的是节点链接（V2Ray / Shadowrocket 格式），不是 Clash 配置：机场没认出客户端，" +
+				"可以在这个订阅的 User-Agent 里填机场支持的客户端（如 clash-verge、ClashMetaForAndroid）再试")
+		}
+		if err != nil {
+			return errors.New("不是 Clash 的 YAML 配置")
+		}
 		return errors.New("配置里没有节点（proxies / proxy-providers 都是空的）")
+	}
+	return nil
+}
+
+var linkSchemes = []string{"vmess://", "vless://", "ss://", "ssr://", "trojan://", "hysteria2://", "hy2://", "hysteria://", "tuic://", "anytls://", "wireguard://", "socks://", "snell://"}
+
+// looksLikeLinkList：内容是节点分享链接列表，或者整段 base64 解出来是（机场给不认识的客户端的通用格式）
+func looksLikeLinkList(data []byte) bool {
+	text := strings.TrimSpace(string(data))
+	if dec, err := base64.StdEncoding.DecodeString(text); err == nil {
+		text = string(dec)
+	} else if dec, err := base64.RawStdEncoding.DecodeString(strings.TrimRight(text, "=")); err == nil {
+		text = string(dec)
+	}
+	for _, line := range strings.SplitN(text, "\n", 8) {
+		line = strings.ToLower(strings.TrimSpace(line))
+		for _, scheme := range linkSchemes {
+			if strings.HasPrefix(line, scheme) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *ProfileStore) check(ctx context.Context, data []byte) error {
+	if err := clashShape(data); err != nil {
+		return err
 	}
 	if s.Validate != nil {
 		if err := s.Validate(ctx, data); err != nil {

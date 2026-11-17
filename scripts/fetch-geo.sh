@@ -7,8 +7,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CACHE="${MEOWX_CACHE:-$ROOT/.cache}/geo"
 BASE="https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest"
 mkdir -p "$CACHE" "$OUT"
-# 文件名照内核找的名字（内核按名字不分大小写找）
-for pair in "geosite.dat:GeoSite.dat" "country.mmdb:Country.mmdb" "GeoLite2-ASN.mmdb:ASN.mmdb"; do
+# 文件名照内核找的名字（内核按名字不分大小写找）。GeoIP.dat 给订阅里写了 geodata-mode: true 的用（GEOIP 规则改读它）：
+# 不带的话内核试读、启动都要现下，NAS 直连 GitHub 下不来就失败，订阅导入报「内核检查没通过」（FlClash 等客户端都带着它）
+for pair in "geosite.dat:GeoSite.dat" "geoip.dat:GeoIP.dat" "country.mmdb:Country.mmdb" "GeoLite2-ASN.mmdb:ASN.mmdb"; do
     src="${pair%%:*}"; dst="${pair##*:}"
     if [ ! -s "$CACHE/$dst" ] || [ -n "${GEO_REFRESH:-}" ]; then
         curl -fsSL --retry 3 -o "$CACHE/$dst.tmp" "$BASE/$src"
