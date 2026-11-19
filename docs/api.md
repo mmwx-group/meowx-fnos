@@ -110,3 +110,7 @@ Peer：`{name, dns_name, ip, os, online, relay, direct, active, routes}`（`rela
 `GET /api/core/proxies`、`PUT /api/core/proxies/<组>` `{name}`、`GET /api/core/proxies/<节点>/delay?url=…&timeout=5000`、
 `GET /api/core/connections`（或 WebSocket）、`DELETE /api/core/connections/<id>`、`GET /api/core/rules`、`PATCH /api/core/configs` `{mode}`。
 内核没在跑时回 502 `{"error":"内核没在运行"}`。
+
+`GET /api/core/meowx/entries`：主控指定的入口（入口覆盖表，规格 miaomiaowuC/Design/entry-realtime.md §2.2 / §7）`{entries: [{server, ips, ports?, names?, rev, chainId, source, updatedAt(ms), confirmedAt(ms), active, nodes?}]}`。
+`names` = 入口 IP → 入口服务器名称，只有用管理员账号登录主控时才有；`nodes` = 当前配置里用到这条覆盖的节点名（老内核没有这个字段）。
+节点页只认 `active` 且带 `nodes` 的条目，给这些节点画「主控指定入口」小标（`web/js/entries.js`）。
