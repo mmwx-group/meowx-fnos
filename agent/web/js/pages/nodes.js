@@ -1,10 +1,12 @@
-// 节点：代理组（经内核 API），手动选择组可点选成员；单个节点与整组测延迟（测速地址见 ../testurl.js）
+// 节点：代理组（经内核 API），手动选择组可点选成员；单个节点与整组测延迟（测速地址见 ../testurl.js）；
+// 主控指定了入口的节点带一个分叉小标（见 ../entries.js）
 import { html, useState, useEffect } from '../lib.js';
 import { get, put, seg } from '../api.js';
 import { useStore, toast, saveSettings } from '../store.js';
 import { Card, Button, Select, TextInput, Dialog } from '../ui.js';
 import { delayClass, stripPeriod } from '../util.js';
 import { TEST_URL_PRESETS, effectiveTestUrl, testUrlChoice, checkTestUrl, lastDelay } from '../testurl.js';
+import { entryIndex, entryLines, entryTip } from '../entries.js';
 
 const TIMEOUT = 5000;
 
@@ -64,9 +66,15 @@ function TestUrlPicker({ value, onSaved }) {
     </span>`;
 }
 
-function Group({ group, proxies, testSetting, open, onToggle, onReload, overrides, setOverride }) {
+// 分叉小图标：主控给这个节点指定了入口（入口覆盖）。入口 IP 不直接写在格子里，悬停 / 点开才看到
+const EntryIcon = () => html`<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill="none" stroke="currentColor"
+    stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M8 14V9.5M8 9.5C8 6.5 4 7 4 3M8 9.5C8 6.5 12 7 12 3M2.2 4.8 4 3l1.8 1.8M10.2 4.8 12 3l1.8 1.8" /></svg>`;
+
+function Group({ group, proxies, testSetting, open, onToggle, onReload, overrides, setOverride, entries }) {
     const [testing, setTesting] = useState(false);
     const [busyNode, setBusyNode] = useState('');
+    const [tipNode, setTipNode] = useState('');   // 点开了入口提示的节点
     const testUrl = effectiveTestUrl(testSetting, group.testUrl);
     const selectable = group.type == 'Selector';
     const delayOf = (name) => (name in overrides ? overrides[name] : lastDelay(proxies[name], testUrl));
@@ -110,6 +118,7 @@ function Group({ group, proxies, testSetting, open, onToggle, onReload, override
     };
 
     const nowDelay = group.now ? delayOf(group.now) : null;
+    const nowEntry = group.now ? entries.get(group.now) : null;
     return html`<section class=${'card group' + (open ? ' is-open' : '')}>
         <div class="card__head" style="margin:0">
             <button type="button" class="group__head" aria-expanded=${open} onClick=${onToggle}>
@@ -117,7 +126,8 @@ function Group({ group, proxies, testSetting, open, onToggle, onReload, override
                 <span style="min-width:0;flex:1">
                     <span class="group__name">${group.name}</span>
                     <span class="badge is-muted" style="margin-left:8px">${typeNames[group.type] || group.type}</span>
-                    <div class="group__now">${group.now ? `当前：${group.now}` : ''}${nowDelay > 0 ? ` · ${nowDelay} ms` : ''} · ${group.all.length} 个成员</div>
+                    <div class="group__now">${group.now ? `当前：${group.now}` : ''}${nowEntry && html`<span
+                        class="entry-mark is-inline" role="img" title=${entryTip(nowEntry)} aria-label=${entryTip(nowEntry)}><${EntryIcon} /></span>`}${nowDelay > 0 ? ` · ${nowDelay} ms` : ''} · ${group.all.length} 个成员</div>
                 </span>
             </button>
             <div class="card__actions"><${Button} small kind="soft" onClick=${testAll} disabled=${testing}>${testing ? '测速中…' : '测速'}<//></div>
@@ -126,10 +136,19 @@ function Group({ group, proxies, testSetting, open, onToggle, onReload, override
         const p = proxies[name];
         const d = delayOf(name);
         const on = name == group.now;
+        const entry = entries.get(name);
+        const tip = entry && entryTip(entry);
+        const tipOpen = !!entry && tipNode == name;
         return html`<div key=${name} class=${'node' + (on ? ' is-on' : '') + (selectable ? ' can-pick' : '')} style=${`--i:${Math.min(i, 12)}`}
                 role=${selectable ? 'button' : null} tabindex=${selectable ? 0 : null} aria-pressed=${selectable ? on : null}
                 onClick=${() => pick(name)} onKeyDown=${(e) => (e.key == 'Enter' || e.key == ' ') && (e.preventDefault(), pick(name))}>
-                <div class="node__name" title=${name}>${name}</div>
+                <div class="node__head">
+                    <div class="node__name" title=${name}>${name}</div>
+                    ${entry && html`<button type="button" class=${'entry-mark' + (tipOpen ? ' is-open' : '')} title=${tip}
+                        aria-label="主控指定入口" aria-expanded=${tipOpen} onKeyDown=${(e) => e.stopPropagation()}
+                        onClick=${(e) => { e.stopPropagation(); setTipNode(tipOpen ? '' : name); }}><${EntryIcon} /></button>`}
+                </div>
+                ${tipOpen && html`<div class="node__entry">${entryLines(entry).map((line) => html`<div>${line}</div>`)}</div>`}
                 <div class="node__foot">
                     <span class="node__type">${typeNames[p?.type] || p?.type || ''}${p?.udp ? ' · UDP' : ''}</span>
                     <button type="button" class=${'delay ' + delayClass(d) + (busyNode == name || testing ? ' is-busy' : '')} title="测延迟"
@@ -149,11 +168,15 @@ export function Nodes({ active, go }) {
     const [open, setOpen] = useState({});
     const [overrides, setOverrides] = useState({});
     const [testSetting, setTestSetting] = useState(null);   // 设置里的 test_url；null = 还没取到
+    const [entries, setEntries] = useState(() => new Map());   // 节点名 → 主控指定的入口（入口覆盖）
 
     const load = async () => {
         try {
-            const [r, c, s] = await Promise.all([get('/core/proxies'), get('/core/configs').catch(() => null), get('/settings').catch(() => null)]);
+            // 入口覆盖表跟着节点数据一起取（不另起定时器）；老内核没有这个接口 / 没有 nodes 字段时得到空表，不显示也不报错
+            const [r, c, s, en] = await Promise.all([get('/core/proxies'), get('/core/configs').catch(() => null), get('/settings').catch(() => null),
+                get('/core/meowx/entries').catch(() => null)]);
             setData(r?.proxies ?? {});
+            setEntries(entryIndex(en));
             if (s) {
                 setTestSetting(s.test_url ?? '');
             }
@@ -215,6 +238,6 @@ export function Nodes({ active, go }) {
         ${groups.length == 0 && html`<${Card}><div class="empty">配置里没有代理组。</div><//>`}
         ${groups.map((g) => html`<${Group} key=${g.name} group=${g} proxies=${data} testSetting=${testSetting} open=${!!open[g.name]}
             onToggle=${() => setOpen((o) => ({ ...o, [g.name]: !o[g.name] }))} onReload=${reload}
-            overrides=${overrides} setOverride=${setOverride} />`)}
+            overrides=${overrides} setOverride=${setOverride} entries=${entries} />`)}
     </div>`;
 }
