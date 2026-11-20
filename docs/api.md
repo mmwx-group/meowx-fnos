@@ -67,11 +67,11 @@ Profile：`{id, name, url?, info_url?, user_agent?, from_panel?, updated_at(秒)
 | POST | `/api/panel/logout` | 退出；删掉从主控导入的订阅（在用的删掉后停内核） |
 | GET | `/api/panel/subscriptions` | 账户下的订阅（`panel subscriptions`） |
 | POST | `/api/panel/import` | `{url, name}` 导入账户下的一份并切过去 |
-| POST | `/api/panel/po0` | `{action: status\|enable\|disable\|fetch\|add\|remove, address?, token?, index?}` |
+| POST | `/api/panel/po0` | `{action: status\|enable\|disable\|fetch\|add\|note\|remove, address?, token?, index?, note?}`：每台带上一次上报的结果 `result`，自定义的带 `note`（备注，最多 40 字，空 = 清除）；`enable` / `add` 之后后台补报一次 |
 
 ## GGY 加白
 
-`POST /api/panel/ggy` `{action: status|enable|disable|add|remove|report, token?, index?}`：与主控账户无关、没登录也能用；`token` 可以是整条分享链接。
+`POST /api/panel/ggy` `{action: status|enable|disable|add|note|remove|report, token?, index?, note?}`：与主控账户无关、没登录也能用；`token` 可以是整条分享链接；每个 token 带 `note`（备注）与上一次的结果 `result`。
 
 ## AkileCDN 白名单
 

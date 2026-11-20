@@ -614,13 +614,15 @@ func (s *Server) subscriptionChanged(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
-// POST /api/panel/po0 {"action":"status|enable|disable|fetch|add|remove","address","token","index"}
+// POST /api/panel/po0 {"action":"status|enable|disable|fetch|add|note|remove","address","token","index","note"}
+// status 里每台 po0 带上一次上报的结果，自己添加的带备注（规格 miaomiaowuC/Design/po0-ggy-results.md）
 func (s *Server) panelPo0(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Action  string `json:"action"`
 		Address string `json:"address"`
 		Token   string `json:"token"`
 		Index   int    `json:"index"`
+		Note    string `json:"note"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -630,6 +632,11 @@ func (s *Server) panelPo0(w http.ResponseWriter, r *http.Request) {
 	case "status", "enable", "disable", "fetch":
 	case "add":
 		args = append(args, body.Address, body.Token)
+		if note := strings.TrimSpace(body.Note); note != "" {
+			args = append(args, note)
+		}
+	case "note":
+		args = append(args, strconv.Itoa(body.Index), strings.TrimSpace(body.Note))
 	case "remove":
 		args = append(args, strconv.Itoa(body.Index))
 	default:
@@ -642,20 +649,25 @@ func (s *Server) panelPo0(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, err)
 		return
 	}
-	// po0 列表变了：直连规则跟着变，内核在跑就重载
-	if body.Action != "status" && before.Enabled {
+	// po0 列表变了：直连规则跟着变，内核在跑就重载（改备注不动列表）
+	if body.Action != "status" && body.Action != "note" && before.Enabled {
 		_ = s.App.Apply(r.Context())
+	}
+	// 打开开关 / 添加之后在后台补报一次，界面过一会儿就有结果（同 OpenWrt 版）
+	if body.Action == "enable" || body.Action == "add" {
+		s.App.ReportSoon()
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_, _ = w.Write(out)
 }
 
-// POST /api/panel/ggy {"action":"status|enable|disable|add|remove|report","token","index"}
+// POST /api/panel/ggy {"action":"status|enable|disable|add|note|remove|report","token","index","note"}
 func (s *Server) panelGGY(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Action string `json:"action"`
 		Token  string `json:"token"`
 		Index  int    `json:"index"`
+		Note   string `json:"note"`
 	}
 	if !readJSON(w, r, &body) {
 		return
@@ -665,6 +677,11 @@ func (s *Server) panelGGY(w http.ResponseWriter, r *http.Request) {
 	case "status", "enable", "disable", "report":
 	case "add":
 		args = append(args, body.Token)
+		if note := strings.TrimSpace(body.Note); note != "" {
+			args = append(args, note)
+		}
+	case "note":
+		args = append(args, strconv.Itoa(body.Index), strings.TrimSpace(body.Note))
 	case "remove":
 		args = append(args, strconv.Itoa(body.Index))
 	default:

@@ -33,6 +33,29 @@ export function relativeTime(ts) {
     return `${Math.floor(diff / 86400)} 天前`;
 }
 
+// po0 / GGY 加白结果的时间（规格 po0-ggy-results.md §1.1，同客户端）：刚刚 / N 分钟前 / 当天写 HH:mm / 跨天写日期
+export function reportTime(ts) {
+    const t = +ts;
+    if (!(t > 0)) {
+        return '';
+    }
+    const diff = Math.max(0, Date.now() / 1000 - t);
+    if (diff < 60) {
+        return '刚刚';
+    }
+    if (diff < 3600) {
+        return `${Math.floor(diff / 60)} 分钟前`;
+    }
+    const d = new Date(t * 1000), now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const hm = `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    if (d.toDateString() == now.toDateString()) {
+        return hm;
+    }
+    const md = `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    return (d.getFullYear() == now.getFullYear() ? md : `${d.getFullYear()}-${md}`) + ' ' + hm;
+}
+
 // 时长（秒）→「3 天 4 小时」「12 分钟」
 export function formatDuration(sec) {
     sec = Math.max(0, Math.floor(sec));
