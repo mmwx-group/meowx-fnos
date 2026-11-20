@@ -4,22 +4,196 @@ import { html, useState, useEffect, useRef } from '../lib.js';
 import { post } from '../api.js';
 import { useStore } from '../store.js';
 import { Card, Button, Switch, Dialog } from '../ui.js';
-import { stripPeriod, relativeTime, same } from '../util.js';
+import { stripPeriod, relativeTime, reportTime, same } from '../util.js';
 
-// po0 加白卡（同客户端「流量控制 → po0 加白」+「自定义 po0 服务器」）：每次操作后用回包原地重画；token 只显示脱敏写法
+// ---------- po0 / GGY 加白：结果、槽位气泡、备注（规格 miaomiaowuC/Design/po0-ggy-results.md，五端同一份） ----------
+
+// 一台 po0 上一次的结果 → { text, cls }（cls：ok-text 绿 / warn-text 黄 / error-text 红）。
+// entries 为 null = po0 的应答里没有名单（老版 po0 只回个确认，规格 §1.1「缺字段时信 200」）
+function po0ResultText(r) {
+    const count = `${(r.entries ?? []).length}` + (r.limit != null ? `/${+r.limit}` : '');
+    switch (r.kind) {
+    case 'success':
+        // 有 limit 才带「条数/limit」；没有名单时只写「已加白」
+        return { text: r.limit != null && Array.isArray(r.entries) ? `已加白 · ${count}` : '已加白', cls: 'ok-text' };
+    case 'disabled':
+        return { text: 'po0 没有开启防火墙', cls: 'warn-text' };
+    case 'notApplied':
+        return { text: `加白未生效 · ${count}`, cls: 'warn-text' };
+    case 'slotConflict':
+        return { text: '槽位冲突：本机 IP 已在这台 po0 的其它槽位，先到 po0 面板删除旧槽位', cls: 'error-text' };
+    case 'invalidToken':
+        return { text: 'token 无效', cls: 'error-text' };
+    }
+    return { text: `失败：${stripPeriod(r.message) || '操作失败'}`, cls: 'error-text' };
+}
+
+// GGY 一个 token 上一次的结果（老内核没有 kind：按 ok / invalid 推）
+function ggyResultText(r) {
+    const kind = r.kind || (r.ok ? 'success' : (r.invalid ? 'invalidToken' : 'failed'));
+    if (kind == 'success') {
+        return { text: r.msg ? `已加白 · ${r.msg}` : '已加白', cls: 'ok-text' };
+    }
+    if (kind == 'invalidToken') {
+        return { text: 'token 无效或已失效', cls: 'error-text' };
+    }
+    return { text: `失败：${stripPeriod(r.error) || '操作失败'}`, cls: 'error-text' };
+}
+
+// 结果行：文字 + 上次上报时间；还没报过写「还没上报」
+function ResultLine({ r, describe }) {
+    if (!r) {
+        return html`<div class="item__meta">还没上报</div>`;
+    }
+    const d = describe(r);
+    const when = reportTime(r.at);
+    return html`<div class=${'item__meta ' + d.cls} title=${d.text}>${d.text}${when ? ' · ' + when : ''}</div>`;
+}
+
+// 同段判断（同 meowx-core 的 po0SameC24）：相等算；任一边以 /24 结尾时前三段相同算；IPv6 只按全等
+function sameC24(a, b) {
+    a = String(a ?? '').trim();
+    b = String(b ?? '').trim();
+    if (!a || !b) {
+        return false;
+    }
+    if (a == b) {
+        return true;
+    }
+    if (!a.endsWith('/24') && !b.endsWith('/24')) {
+        return false;
+    }
+    const pa = a.replace(/\/24$/, '').split('.'), pb = b.replace(/\/24$/, '').split('.');
+    return pa.length == 4 && pb.length == 4 && pa[0] == pb[0] && pa[1] == pb[1] && pa[2] == pb[2];
+}
+
+// 槽位气泡（规格 §2）：锚定在「槽位」按钮上的浮层，点外面 / Esc 关；只读
+function Po0Slots({ title, result }) {
+    const [open, setOpen] = useState(false);
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+        const close = () => setOpen(false);
+        const esc = (e) => { if (e.key == 'Escape') setOpen(false); };
+        document.addEventListener('click', close);
+        document.addEventListener('keydown', esc);
+        return () => {
+            document.removeEventListener('click', close);
+            document.removeEventListener('keydown', esc);
+        };
+    }, [open]);
+    let body;
+    const when = result ? reportTime(result.at) : '';
+    if (!result || result.enabled == null) {
+        // 没有 200 的结果（没报过 / 失败 / 冲突）：只有那句结果与时间
+        const d = result ? po0ResultText(result) : { text: '还没上报', cls: '' };
+        body = html`<div class=${'slots__summary ' + d.cls}>${d.text}</div>
+            ${when && html`<div class="slots__foot">上次上报 ${when}</div>`}`;
+    } else {
+        // 应答里没有名单（entries 为 null）就不画名单与空位；没有 current_ip 时 sameC24 不会命中，不标「本机」
+        const hasList = Array.isArray(result.entries);
+        const entries = result.entries ?? [];
+        const limit = hasList && +result.limit > 0 ? +result.limit : 0;
+        const empty = Array.from({ length: Math.max(0, limit - entries.length) });
+        const summary = !result.enabled ? '防火墙未开启'
+            : !hasList ? '防火墙已开启'
+                : `防火墙已开启 · 名单 ${entries.length}${limit ? '/' + limit : ' 条'}`;
+        body = html`
+            <div class="slots__summary">${summary}</div>
+            ${(entries.length > 0 || empty.length > 0) && html`<ul class="slots__list">
+                ${entries.map((e) => {
+                    const mine = sameC24(e.ip, result.current_ip);
+                    return html`<li class=${'slots__entry' + (mine ? ' is-mine' : '')}>
+                        <span class="slots__ip">${e.ip}</span>
+                        ${mine && html`<span class="slots__tag is-mine">本机</span>`}
+                        ${e.slot != null && html`<span class="slots__tag">📌 槽位 ${e.slot}</span>`}
+                    </li>`;
+                })}
+                ${empty.map(() => html`<li class="slots__entry is-empty">空位</li>`)}
+            </ul>`}
+            <div class="slots__foot">
+                ${result.current_ip && html`<div>本机出口 ${result.current_ip}</div>`}
+                <div>${result.slot != null ? `本机使用槽位 ${result.slot}` : '本机未固定槽位，名单满时最久没上报的会被挤掉'}</div>
+                ${when && html`<div>上次上报 ${when}</div>`}
+            </div>`;
+    }
+    return html`<div class="slots">
+        <button type="button" class="btn small" aria-label="查看槽位" title="查看槽位" aria-haspopup="dialog" aria-expanded=${open}
+            onClick=${(e) => { e.stopPropagation(); setOpen(!open); }}>槽位</button>
+        ${open && html`<div class="slots__pop" role="dialog" aria-label=${title} onClick=${(e) => e.stopPropagation()}>
+            <div class="slots__title">${title}</div>
+            ${body}
+        </div>`}
+    </div>`;
+}
+
+// 改备注的一行（自定义 po0 / GGY token 共用）：输入框 + 保存 / 取消，空 = 清除；最多 40 个字
+function NoteEditor({ note, sub, onSave, onCancel }) {
+    const [value, setValue] = useState(note ?? '');
+    const input = useRef(null);
+    useEffect(() => { input.current?.focus(); }, []);
+    return html`<div class="item">
+        <div class="item__main">
+            <div class="item__meta mono">${sub}</div>
+            <form class="inline" onSubmit=${(e) => e.preventDefault()}>
+                <input ref=${input} class="input" placeholder="备注（可选）" maxlength="40" autocomplete="off" value=${value}
+                    onInput=${(e) => setValue(e.currentTarget.value)}
+                    onKeyDown=${(e) => {
+                        if (e.key == 'Enter') {
+                            e.preventDefault();
+                            onSave(value.trim());
+                        } else if (e.key == 'Escape') {
+                            onCancel();
+                        }
+                    }} />
+                <${Button} kind="primary" onClick=${() => onSave(value.trim())}>保存<//>
+                <${Button} onClick=${onCancel}>取消<//>
+            </form>
+        </div>
+    </div>`;
+}
+
+// po0 加白卡（同客户端「流量控制 → po0 加白」+「自定义 po0 服务器」）：每次操作后用回包原地重画；token 只显示脱敏写法。
+// 开着时每台 po0 一行显示上一次上报的结果、「槽位」点开气泡看它的白名单；自己添加的可写备注（有备注时标题是备注）
 function Po0Card() {
     const { panel } = useStore();
     const [st, setSt] = useState(null);
     const [error, setError] = useState('');
     const [address, setAddress] = useState('');
     const [token, setToken] = useState('');
+    const [note, setNote] = useState('');
     const [bad, setBad] = useState({});
+    const [editing, setEditing] = useState(-1);
+    const editingRef = useRef(-1);
+    editingRef.current = editing;
+    const alive = useRef(true);
+    useEffect(() => () => { alive.current = false; }, []);
     const act = async (body) => {
         setError('');
         try {
-            setSt(await post('/panel/po0', body));
+            const res = await post('/panel/po0', body);
+            setSt(res);
+            setEditing(-1);
+            // 打开开关 / 添加之后控制服务在后台补报：过一会儿再取两次状态，把结果补上（正在改备注时不打断）
+            if (body.action == 'enable' || body.action == 'add') {
+                for (const delay of [5000, 15000]) {
+                    setTimeout(() => {
+                        if (!alive.current || editingRef.current >= 0) {
+                            return;
+                        }
+                        post('/panel/po0', { action: 'status' }).then((r) => {
+                            if (alive.current && editingRef.current < 0) {
+                                setSt((cur) => (same(cur, r) ? cur : r));
+                            }
+                        }, () => { });
+                    }, delay);
+                }
+            }
+            return true;
         } catch (err) {
             setError(stripPeriod(err.message) || '操作失败');
+            return false;
         }
     };
     useEffect(() => { act({ action: 'status' }); }, []);
@@ -38,9 +212,11 @@ function Po0Card() {
             setError('token 不对：应为 pgnfw_ 开头的那一整串，可带 @槽位');
             return;
         }
-        await act({ action: 'add', address: a, token: t });
-        setAddress('');
-        setToken('');
+        if (await act({ action: 'add', address: a, token: t, note: note.trim() })) {
+            setAddress('');
+            setToken('');
+            setNote('');
+        }
     };
     const toggle = html`<${Switch} label="po0 加白" checked=${st.enabled} onChange=${(on) => act({ action: on ? 'enable' : 'disable' })} />`;
     const panelList = st.panel ?? [];
@@ -53,24 +229,39 @@ function Po0Card() {
                 ? html`<p class="hint">登录主控账户后自动获取。</p>`
                 : panelList.length == 0
                     ? html`<p class="hint">这个账户下没有 po0 服务器。</p>`
-                    : html`<div class="list">${panelList.map((s) => html`<div class="item"><div class="item__main">
-                        <div class="item__mono">${s.name || s.host}</div>
-                        ${s.name && html`<div class="item__meta mono">${s.host}</div>`}
-                    </div></div>`)}</div>`}`}
+                    : html`<div class="list">${panelList.map((s) => html`<div class="item">
+                        <div class="item__main">
+                            <div class="item__mono">${s.name || s.host}</div>
+                            ${s.name && html`<div class="item__meta mono">${s.host}</div>`}
+                            <${ResultLine} r=${s.result} describe=${po0ResultText} />
+                        </div>
+                        <${Po0Slots} title=${s.name || s.host} result=${s.result} />
+                    </div>`)}</div>`}`}
         <div class="section-title">自定义 po0 服务器（${custom.length}）</div>
-        ${custom.length > 0 && html`<div class="list">${custom.map((s, i) => html`<div class="item">
-            <div class="item__main">
-                <div class="item__mono">${s.address}</div>
-                <div class="item__meta mono">${s.token}</div>
-            </div>
-            <${Button} small kind="danger" onClick=${() => act({ action: 'remove', index: i })}>删除<//>
-        </div>`)}</div>`}
+        ${custom.length > 0 && html`<div class="list">${custom.map((s, i) => editing == i
+            ? html`<${NoteEditor} note=${s.note} sub=${`${s.address} · ${s.token}`}
+                onSave=${(v) => act({ action: 'note', index: i, note: v })} onCancel=${() => setEditing(-1)} />`
+            : html`<div class="item can-wrap">
+                <div class="item__main">
+                    ${s.note
+                        ? html`<div class="item__name">${s.note}</div><div class="item__meta mono">${s.address} · ${s.token}</div>`
+                        : html`<div class="item__mono">${s.address}</div><div class="item__meta mono">${s.token}</div>`}
+                    ${st.enabled && html`<${ResultLine} r=${s.result} describe=${po0ResultText} />`}
+                </div>
+                <div class="item__actions">
+                    ${st.enabled && html`<${Po0Slots} title=${s.note || s.address} result=${s.result} />`}
+                    <${Button} small onClick=${() => { setError(''); setEditing(i); }}>备注<//>
+                    <${Button} small kind="danger" onClick=${() => act({ action: 'remove', index: i })}>删除<//>
+                </div>
+            </div>`)}</div>`}
         ${!st.enabled && custom.length > 0 && html`<p class="hint">「po0 加白」关着，这些服务器暂时不上报。</p>`}
         <form class="inline wrap" onSubmit=${(e) => e.preventDefault()}>
             <input class=${'input is-full' + (bad.address ? ' is-invalid' : '')} placeholder="加白服务器地址：IP 或域名，可带端口" spellcheck="false" autocomplete="off"
                 value=${address} onInput=${(e) => setAddress(e.currentTarget.value)} />
             <input class=${'input' + (bad.token ? ' is-invalid' : '')} type="password" placeholder="token，pgnfw_ 开头（可带 @槽位）" autocomplete="new-password"
                 value=${token} onInput=${(e) => setToken(e.currentTarget.value)} />
+            <input class="input" placeholder="备注（可选）" maxlength="40" autocomplete="off"
+                value=${note} onInput=${(e) => setNote(e.currentTarget.value)} />
             <${Button} kind="primary" onClick=${add}>添加<//>
         </form>
         ${error && html`<p class="error-text">${error}</p>`}
@@ -88,18 +279,23 @@ function parseGgyToken(input) {
     return /^[A-Za-z0-9_-]{8,200}$/.test(s) ? s : null;
 }
 
-// GGY 加白卡（同客户端「GGY 加白」，紧跟 po0 加白卡）：开关 + token 列表（脱敏写法 + 上一次的结果）
+// GGY 加白卡（同客户端「GGY 加白」，紧跟 po0 加白卡）：开关 + token 列表（备注 / 脱敏写法 + 上一次的结果）
 function GgyCard() {
     const [st, setSt] = useState(null);
     const [error, setError] = useState('');
     const [token, setToken] = useState('');
+    const [note, setNote] = useState('');
     const [bad, setBad] = useState(false);
+    const [editing, setEditing] = useState(-1);
     const act = async (body) => {
         setError('');
         try {
             setSt(await post('/panel/ggy', body));
+            setEditing(-1);
+            return true;
         } catch (err) {
             setError(stripPeriod(err.message) || '操作失败');
+            return false;
         }
     };
     useEffect(() => { act({ action: 'status' }); }, []);
@@ -113,37 +309,40 @@ function GgyCard() {
             setError(token.trim() ? 'token 格式不对' : '请填写 token');
             return;
         }
-        await act({ action: 'add', token: t });
-        setToken('');
-    };
-    // 上一次的结果：成功 / 失败原因 / 还没报过
-    const result = (r) => {
-        if (!r) {
-            return html`<div class="item__meta">还没报过</div>`;
+        if (await act({ action: 'add', token: t, note: note.trim() })) {
+            setToken('');
+            setNote('');
         }
-        const when = +r.at > 0 ? ' · ' + relativeTime(r.at) : '';
-        return r.ok
-            ? html`<div class="item__meta ok-text">成功${when}</div>`
-            : html`<div class="item__meta error-text" title=${r.error || ''}>失败：${r.error || '操作失败'}${when}</div>`;
     };
     const tokens = st.tokens ?? [];
     const toggle = html`<${Switch} label="GGY 加白" checked=${st.enabled} onChange=${(on) => act({ action: on ? 'enable' : 'disable' })} />`;
     return html`<${Card} title="GGY 加白" actions=${toggle}
         desc="把 NAS 的出口 IP 上报到 GGY（咕咕云）服务器的防火墙白名单：填分享链接里的 token（也可以直接粘贴整条链接），每 10 分钟自动加白；上报走直连。">
         <div class="section-title">token（${tokens.length}）</div>
-        ${tokens.length > 0 && html`<div class="list">${tokens.map((item, i) => html`<div class="item">
-            <div class="item__main">
-                <div class="item__mono">${item.token}</div>
-                ${result(item.result)}
-            </div>
-            <${Button} small kind="danger" onClick=${() => act({ action: 'remove', index: i })}>删除<//>
-        </div>`)}</div>`}
+        ${tokens.length > 0 && html`<div class="list">${tokens.map((item, i) => editing == i
+            ? html`<${NoteEditor} note=${item.note} sub=${item.token}
+                onSave=${(v) => act({ action: 'note', index: i, note: v })} onCancel=${() => setEditing(-1)} />`
+            : html`<div class="item can-wrap">
+                <div class="item__main">
+                    ${item.note
+                        ? html`<div class="item__name">${item.note}</div><div class="item__meta mono">${item.token}</div>`
+                        : html`<div class="item__mono">${item.token}</div>`}
+                    <${ResultLine} r=${item.result} describe=${ggyResultText} />
+                </div>
+                <div class="item__actions">
+                    <${Button} small onClick=${() => { setError(''); setEditing(i); }}>备注<//>
+                    <${Button} small kind="danger" onClick=${() => act({ action: 'remove', index: i })}>删除<//>
+                </div>
+            </div>`)}</div>`}
         ${tokens.some((item) => item.result?.invalid) && html`<p class="hint">有 token 无效或已失效：请到 GGY 重新生成分享链接，添加新的 token 后删掉旧的。</p>`}
         ${!st.enabled && tokens.length > 0 && html`<p class="hint">「GGY 加白」开关关着，添加的 token 暂不上报。</p>`}
-        <form class="inline" onSubmit=${(e) => e.preventDefault()}>
-            <input class=${'input' + (bad ? ' is-invalid' : '')} type="password" placeholder="token，也可以粘贴整条分享链接" autocomplete="new-password"
+        <form class="inline wrap" onSubmit=${(e) => e.preventDefault()}>
+            <input class=${'input is-full' + (bad ? ' is-invalid' : '')} type="password" placeholder="token，也可以粘贴整条分享链接" autocomplete="new-password"
                 value=${token} onInput=${(e) => setToken(e.currentTarget.value)}
-                onKeyDown=${(e) => { if (e.key == 'Enter') { e.preventDefault(); e.currentTarget.nextElementSibling?.click(); } }} />
+                onKeyDown=${(e) => { if (e.key == 'Enter') { e.preventDefault(); add(); } }} />
+            <input class="input" placeholder="备注（可选）" maxlength="40" autocomplete="off"
+                value=${note} onInput=${(e) => setNote(e.currentTarget.value)}
+                onKeyDown=${(e) => { if (e.key == 'Enter') { e.preventDefault(); add(); } }} />
             <${Button} kind="primary" onClick=${add}>添加<//>
         </form>
         ${error && html`<p class="error-text">${error}</p>`}

@@ -2029,6 +2029,11 @@ code,
     color: var(--slow);
 }
 
+.warn-text,
+.item__meta.warn-text {
+    color: var(--mid);
+}
+
 /* ---------- 网络测速 ---------- */
 
 .speed {
@@ -2360,4 +2365,125 @@ code,
     color: var(--t2);
     font-size: 13.5px;
     line-height: 1.6;
+}
+
+/* po0 槽位气泡（规格 po0-ggy-results.md §2）：锚定在「槽位」按钮上，右对齐往下弹，点外面关；样式同「切换订阅」菜单 */
+.slots {
+    position: relative;
+    flex: none;
+}
+
+.slots__pop {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 8px);
+    z-index: 40;
+    width: 300px;
+    max-width: calc(100vw - 64px);
+    padding: 12px 14px;
+    border-radius: 16px;
+    background: var(--elev);
+    border: 1px solid var(--stroke);
+    box-shadow: 0 12px 32px var(--shadow);
+    text-align: left;
+    transform-origin: top right;
+    animation: pop .22s var(--soft-spring);
+}
+
+.slots__title {
+    font-size: 14px;
+    font-weight: 750;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.slots__summary {
+    margin-top: 2px;
+    color: var(--t2);
+    font-size: 12.5px;
+    font-weight: 600;
+}
+
+.slots__summary.ok-text {
+    color: var(--good);
+}
+
+.slots__summary.warn-text {
+    color: var(--mid);
+}
+
+.slots__summary.error-text {
+    color: var(--slow);
+}
+
+.slots__list {
+    list-style: none;
+    margin: 10px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.slots__entry {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 28px;
+    padding: 0 10px;
+    border-radius: 10px;
+    background: var(--elev2);
+    font-family: var(--mono);
+    font-size: 12.5px;
+}
+
+.slots__entry.is-mine {
+    background: var(--soft);
+    color: var(--rose);
+    font-weight: 700;
+}
+
+.slots__entry.is-empty {
+    background: transparent;
+    border: 1px dashed var(--stroke);
+    color: var(--t2);
+    font-family: inherit;
+}
+
+.slots__ip {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.slots__tag {
+    flex: none;
+    color: var(--t2);
+    font-size: 11.5px;
+    font-weight: 650;
+}
+
+.slots__tag.is-mine {
+    color: var(--rose);
+}
+
+.slots__foot {
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--stroke);
+    color: var(--t2);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+/* 窄屏：行尾按钮换到下一行后（.item.can-wrap）「槽位」在行首，气泡改成左对齐 */
+@media (max-width: 640px) {
+    .item.can-wrap .slots__pop {
+        left: 0;
+        right: auto;
+        transform-origin: top left;
+    }
 }

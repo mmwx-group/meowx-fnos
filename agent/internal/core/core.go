@@ -43,6 +43,7 @@ func (p Paths) PanelEnv() []string {
 		"MEOWX_PANEL_STATE=" + filepath.Join(p.Panel, "panel.json"),
 		"MEOWX_PO0_STATE=" + filepath.Join(p.Panel, "po0.json"),
 		"MEOWX_GGY_RESULTS=" + filepath.Join(p.Panel, "ggy-results.json"),
+		"MEOWX_PO0_RESULTS=" + filepath.Join(p.Panel, "po0-results.json"), // po0 每台上一次上报的结果（老内核不认，忽略）
 		"MEOWX_APP_LOG=" + filepath.Join(p.Panel, "app.log"),
 		"MEOWX_GGY_STATE=" + filepath.Join(p.Panel, "ggy.json"), // 没有 uci，GGY 设置存文件
 		"MEOWX_AKILE_STATE=" + p.AkileStatePath(),               // AkileCDN 白名单同样存文件

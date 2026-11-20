@@ -505,6 +505,21 @@ func (a *App) AkileNodesConfig() string {
 	return run
 }
 
+// ReportSoon：打开 po0 加白 / 添加自定义 po0 之后在后台补报一次白名单（同 OpenWrt 版），界面过一会儿就能看到每台的结果；
+// 同定时上报，内核没在跑不报
+func (a *App) ReportSoon() {
+	if !a.Core.Status().Running {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		defer cancel()
+		if _, err := a.Core.Panel(ctx, "report"); err != nil {
+			a.Log.Add("agent", "白名单上报失败："+err.Error())
+		}
+	}()
+}
+
 // timer = 定时那一轮：AkileCDN 只在出口 IP 变了时才写（一条规则只放一个 IP，多台设备都开时别每 10 分钟互相覆盖）
 func (a *App) panelReport(ctx context.Context, timer bool) {
 	before := fmt.Sprint(a.po0ReportURLs())
