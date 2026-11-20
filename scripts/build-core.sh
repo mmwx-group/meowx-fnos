@@ -3,12 +3,12 @@
 # meowx-core 按 CORE_REF 拉源码（缓存在 .cache/meowx-core，MEOWX_CACHE 可改；开发时可用 MEOWX_CORE_SRC 指向本地检出），有补丁时打上
 # patches/core/*.patch（-p3），tag 同 OpenWrt 版：喵窝用官方 tailscaled，内核不带 tailscale。
 # 以前的补丁 003–006（喵窝入网、GGY 设置存文件、账户订阅挂在订阅域名上）都已并进 meowx-core，现在没有补丁。
-# CORE_REF = meowx-core v0.5.3 = efe7527（在 bb8c3fc 基础上多：主控实时通道——入口覆盖表、加密实时通道客户端、/meowx/realtime 控制接口）。Actions 从 GitHub 拉源码，要指向已经推上去的提交。
+# CORE_REF = meowx-core v0.5.4 = 62446a0（在 efe7527 基础上多：po0 / GGY 加白结果与备注、po0 槽位名单，入口服务器名称 names 与 /meowx/entries 的 nodes / 节点小标）。Actions 从 GitHub 拉源码，要指向已经推上去的提交。
 set -euo pipefail
 GOARCH="${1:?amd64 | arm64}"
 OUT="${2:?输出路径}"
 CORE_REPO="https://github.com/mmwx-group/meowx-core.git"
-CORE_REF="${CORE_REF:-efe7527}"
+CORE_REF="${CORE_REF:-62446a0}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 SRC="${MEOWX_CACHE:-$ROOT/.cache}/meowx-core"
 
