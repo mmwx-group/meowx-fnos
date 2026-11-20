@@ -27,7 +27,7 @@
 **网页密码**：管理页面缺省不要密码，NAS 的 7899 端口会开放到外网时请在「设置」里设一个。
 
 **群晖 / 威联通 / 绿联等别的 NAS**：有通用 Docker 版（同一套程序，导入镜像后用 docker compose 起），
-安装步骤与限制见 [docs/docker.md](docs/docker.md)。还在第一阶段：没有发布镜像，要自己构建（`scripts/build-docker.sh`）。
+镜像 `ghcr.io/mmwx-group/meowx-docker`，离线镜像（国内 NAS 用）在 Release 与 dl.miaomiaowux.com；安装步骤与限制见 [docs/docker.md](docs/docker.md)。
 
 ## 从源码打包
 

@@ -25,6 +25,10 @@ RUN set -eu; \
     mkdir -p /out/data /out/tmp /out/run; chmod 1777 /out/tmp
 
 FROM scratch
+# source 把 ghcr.io 上的镜像包挂到这个仓库下（仓库页侧栏的 Packages 里能看到）
+LABEL org.opencontainers.image.source="https://github.com/mmwx-group/meowx-fnos" \
+      org.opencontainers.image.title="MeowX for NAS (Docker)" \
+      org.opencontainers.image.description="MeowX 通用 Docker 版：群晖 / 威联通 / 绿联等 NAS 的代理、透明代理与喵窝组网"
 COPY --from=base /out/ /
 ARG TARGETARCH
 COPY rootfs-${TARGETARCH}/ /

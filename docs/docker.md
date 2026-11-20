@@ -1,7 +1,8 @@
 # MeowX 通用 Docker 版（群晖 / 威联通 / 绿联等 NAS）
 
-> 第一阶段（2026-11-10）：代码与镜像能在本地构建、在飞牛测试机上用 Docker 实测通过；**还没有发布**，镜像要自己构建（见文末）。
-> 镜像发布到哪个仓库、叫什么名字还没定，下面的镜像名 `meowx-docker` 是本地构建出来的名字。
+> 和飞牛版一起发版：镜像 `ghcr.io/mmwx-group/meowx-docker`（amd64 / arm64，标签 `<版本>` 与 `latest`），
+> 离线镜像在 [GitHub Release](https://github.com/mmwx-group/meowx-fnos/releases) 与 `dl.miaomiaowux.com/meowx/docker/`。
+> 在飞牛测试机上用 Docker 实测过（见文末），**还没在真的群晖 / 威联通 / 绿联上跑过**。
 
 和飞牛版是同一套程序（控制服务 `meowx-agent` + 内核 `meowx-core` + 官方 `tailscaled`），功能一样：订阅、节点、代理端口、
 网络测速、透明代理（NAS 本机 / 其它容器 / 旁路由）、喵窝、po0 / GGY / AkileCDN 加白。区别：
@@ -42,8 +43,15 @@
 
 ### 1. 拿到镜像
 
-现在只能自己构建（见「从源码构建」）：得到 `meowx-docker-<版本>-amd64.tar`（x86）或 `…-arm64.tar`（ARM）。
-国内的 NAS 拉 Docker Hub / GHCR 经常不通，所以先做成离线镜像文件，在 NAS 的 Docker 界面里「导入」。
+两种都行，导入或拉下来的镜像名都是 `ghcr.io/mmwx-group/meowx-docker`，同一份 compose 不用改：
+
+- **离线镜像**（国内的 NAS 拉 GHCR / Docker Hub 经常不通，推荐这个）：下载 `meowx-docker-<版本>-amd64.tar`（x86）或
+  `…-arm64.tar`（ARM），地址是 `https://dl.miaomiaowux.com/meowx/docker/meowx-docker-<版本>-<架构>.tar`
+  （最新版本号与校验值见 `https://dl.miaomiaowux.com/meowx/latest.json` 的 `docker` 段），GitHub Release 里也有；
+  然后在 NAS 的 Docker 界面里「导入」（下面各家的步骤里有）。
+- **直接拉**（NAS 能连 ghcr.io 时）：compose 起容器时会自己拉，或先 `docker pull ghcr.io/mmwx-group/meowx-docker:latest`。
+
+想自己构建见「从源码构建」。
 
 ### 2. 群晖（DSM 7）
 
@@ -57,7 +65,7 @@
    ```sh
    [ -e /dev/net/tun ] || insmod /lib/modules/tun.ko
    ```
-2. Container Manager → 映像 → 新增 → 从文件添加 → 选 `meowx-docker-<版本>-<架构>.tar`。
+2. Container Manager → 映像 → 新增 → 从文件添加 → 选 `meowx-docker-<版本>-<架构>.tar`（能连 ghcr.io 的可以跳过这步）。
 3. File Station 里建一个目录，如 `/volume1/docker/meowx`，把 `docker/docker-compose.yml` 放进去，
    把 `MEOWX_PLATFORM=docker` 改成 `MEOWX_PLATFORM=synology`（只影响显示名与报给主控的系统名）。
 4. Container Manager → 项目 → 新增：路径选上面那个目录、来源选「使用现有的 docker-compose.yml」，建好就会启动。
@@ -85,9 +93,9 @@
 ### 其它装了 Docker 的 Linux
 
 ```sh
-docker load -i meowx-docker-<版本>-amd64.tar
-mkdir -p ~/meowx && cp docker/docker-compose.yml ~/meowx/ && cd ~/meowx
-docker compose up -d
+mkdir -p ~/meowx && cd ~/meowx
+curl -fLO https://raw.githubusercontent.com/mmwx-group/meowx-fnos/main/docker/docker-compose.yml
+docker compose up -d                       # 能连 ghcr.io 时直接拉；连不上先 docker load -i meowx-docker-<版本>-amd64.tar
 ```
 
 ## 环境变量
@@ -130,20 +138,23 @@ docker compose up -d
 网页「设置」里会检查新版本（发布清单 `latest.json` 的 `docker` 一段，见下），但**不能一键更新**：容器换不了自己的镜像。
 有新版时：
 
-- 离线镜像：下载新的 tar，在 Docker 界面里导入，然后在「项目」里重新构建 / 重启（compose 用的是 `meowx-docker:latest`，导入新版后指向新镜像）。
-- 以后发布到镜像仓库时：`docker compose pull && docker compose up -d`。
+- 离线镜像：下载新的 tar，在 Docker 界面里导入，然后在「项目」里重新构建 / 重启（compose 用的是 `ghcr.io/mmwx-group/meowx-docker:latest`，
+  导入新版后这个标签指向新镜像）。
+- 能连 ghcr.io：`docker compose pull && docker compose up -d`。
 
 数据目录不动，设置、订阅、喵窝的设备身份都保留。
 
-发布清单的 docker 一段（约定，发布时写）：
+发布清单的 docker 一段（发版时由 `scripts/publish_cdn.py --platform docker` 写）：
 
 ```json
 "docker": {
   "version": "0.2.0",
+  "core": "…",
   "releasedAt": "…",
-  "image": "<仓库>/meowx:0.2.0",
+  "image": "ghcr.io/mmwx-group/meowx-docker:0.2.0",
   "files": [
-    {"kind": "image-tar", "arch": "x86_64", "name": "meowx-docker-0.2.0-amd64.tar", "url": "…", "size": 0, "sha256": "…"},
+    {"kind": "image-tar", "arch": "x86_64", "name": "meowx-docker-0.2.0-amd64.tar",
+     "url": "https://dl.miaomiaowux.com/meowx/docker/meowx-docker-0.2.0-amd64.tar", "size": 0, "sha256": "…"},
     {"kind": "image-tar", "arch": "arm64",  "name": "meowx-docker-0.2.0-arm64.tar", "url": "…", "size": 0, "sha256": "…"}
   ]
 }
@@ -192,9 +203,12 @@ scripts/build-docker.sh <版本> --context-only       # 只备好构建目录 di
 
 要 Go 1.27、git、curl、`docker buildx`。内核同飞牛版按 `scripts/build-core.sh` 编（`CORE_BIN_amd64` / `CORE_BIN_arm64` 可指向编好的）。
 Alpine 的包在构建机自己的架构上装进目标架构的目录，出 arm64 镜像不需要 qemu。
-buildx 用 Docker 缺省的 docker 驱动时导不出 tar，脚本会先 `--load` 再 `docker save`（本机会留下 `meowx-docker:<版本>` / `latest` 两个标签）。
+buildx 用 Docker 缺省的 docker 驱动时导不出 tar，脚本会先 `--load` 再 `docker save`（本机会留下 `ghcr.io/mmwx-group/meowx-docker:<版本>` / `latest` 两个标签）。
+镜像不带 provenance / SBOM 证明（清单里多出来的 unknown/unknown 条目，NAS 上较老的 Docker 与图形界面不认）。
 
-GitHub Actions 的草稿在 `.github/workflow-drafts/docker.yml`（没放进 `workflows/`，不会跑）：只打离线镜像传到 Actions 产物，推镜像仓库的步骤注释掉了。
+发布在 `.github/workflows/build.yml` 的 `docker` 作业：推 main 时只打离线镜像传到 Actions 产物；打 tag（不带 `-`）时
+`scripts/build-docker.sh <版本> --tar --push`（同一份构建目录出离线镜像、推 ghcr.io），离线镜像挂到 Release、
+`publish-docker` 作业传 CDN 并写 latest.json 的 docker 段。手动触发勾 `docker` 只补发 Docker 版。
 
 ## 实测记录
 

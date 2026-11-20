@@ -5,8 +5,9 @@
 # 群晖默认没有 /dev/net/tun：先 `sudo insmod /lib/modules/tun.ko`（开机自动加载见 docs/docker.md），否则容器起不来。
 services:
   meowx:
-    # 离线导入的镜像叫 meowx-docker:<版本>（也带 latest）；以后发布到镜像仓库后换成仓库里的名字
-    image: meowx-docker:latest
+    # 能连 ghcr.io 的直接拉；连不上的先导入离线镜像（dl.miaomiaowux.com 或 GitHub Release 里的 meowx-docker-<版本>-<架构>.tar），
+    # 导入后的名字也是这个，compose 用本机已有的、不会再去拉
+    image: ghcr.io/mmwx-group/meowx-docker:latest
     container_name: meowx
     network_mode: host
     cap_add:

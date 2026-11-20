@@ -1,12 +1,16 @@
 name: build
 
-# 推 main：x86 / arm 各打一个飞牛安装包（fpk），传到 Actions 产物，不发布。
-# 打 tag（v*，要与 fnos/manifest 的 version 一致）：再发 GitHub Release，并推 CDN（dl.miaomiaowux.com/meowx/fnos + latest.json）。
-# 带 '-' 的 tag（如 v0.2.0-pre1）只发 GitHub 预发布、不推 CDN。手动触发在 main 上且勾了 publish 也推 CDN。
+# 推 main：x86 / arm 各打一个飞牛安装包（fpk），再打通用 Docker 版两个架构的离线镜像（tar），都传到 Actions 产物，不发布。
+# 打 tag（v*，要与 fnos/manifest 的 version 一致）：再发 GitHub Release（fpk + 离线镜像），并发布——
+#   飞牛版：推 CDN（dl.miaomiaowux.com/meowx/fnos + latest.json 的 fnos 段）；
+#   Docker 版：推 ghcr.io/mmwx-group/meowx-docker（多架构，标签 <版本> 与 latest），离线镜像推 CDN（meowx/docker + docker 段）。
+# 带 '-' 的 tag（如 v0.2.0-pre1）只发 GitHub 预发布，不推 CDN、不推镜像仓库。
+# 手动触发在 main 上：勾 publish 推飞牛版、勾 docker 发布 Docker 版，两者各管各的（只补发 Docker 版时别勾 publish：
+# 同版本号重新打出来的 fpk 字节不同（geo 数据每次取最新），覆盖 CDN 上长缓存的旧包会让一键更新校验失败）。
 #
 # 打包在自建 runner（[self-hosted, lax]）上跑。这是公开仓库：不接 pull_request——自建 runner 会执行 PR 里的任意代码。
 # 推 CDN 需要仓库 secrets：R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY（与 meowC、meowx-openwrt 同名）；
-# 可选 variables.R2_BUCKET（默认 mmwx-dl）。
+# 可选 variables.R2_BUCKET（默认 mmwx-dl）。推 ghcr.io 用 GITHUB_TOKEN（作业里给了 packages: write）。
 on:
   push:
     branches: [main]
@@ -14,7 +18,11 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: '打完推到 CDN（dl.miaomiaowux.com，更新 latest.json）'
+        description: '飞牛版：打完推到 CDN（dl.miaomiaowux.com，更新 latest.json 的 fnos 段）'
+        type: boolean
+        default: false
+      docker:
+        description: 'Docker 版：推 ghcr.io 镜像 + 离线镜像推 CDN（更新 latest.json 的 docker 段）'
         type: boolean
         default: false
 
@@ -81,9 +89,82 @@ jobs:
           path: dist/*.fpk
           if-no-files-found: error
 
+  # 通用 Docker 版（群晖 / 威联通 / 绿联）：两个架构的离线镜像传到 Actions 产物；要发布时同一份构建目录再推 ghcr.io。
+  # 离线镜像要先装进本机 docker 再 docker save，两个架构在一个作业里串行打；concurrency 让别的运行（同一台机器、
+  # 同一个 docker daemon）的这个作业排队，免得互相改掉本机的镜像标签。
+  docker:
+    runs-on: [self-hosted, lax]
+    timeout-minutes: 40
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: meowx-docker-image
+      cancel-in-progress: false
+    env:
+      MEOWX_CACHE: ${{ github.workspace }}/../../meowx-fnos-cache
+      GEO_REFRESH: '1'
+      IMAGE: ghcr.io/mmwx-group/meowx-docker
+      PUSH: ${{ (github.ref_type == 'tag' && !contains(github.ref_name, '-')) || (github.event_name == 'workflow_dispatch' && inputs.docker && github.ref == 'refs/heads/main') }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      core: ${{ steps.version.outputs.core }}
+      pushed: ${{ steps.version.outputs.push }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.27'
+          cache: false
+
+      - name: version
+        id: version
+        run: |
+          version=$(sed -n 's/^version *= *//p' fnos/manifest)
+          core=$(sed -n 's/^CORE_REF="${CORE_REF:-\(.*\)}"$/\1/p' scripts/build-core.sh)
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} 与 fnos/manifest 的 version ${version} 不一致"
+            exit 1
+          fi
+          [ -n "$version" ] && [ -n "$core" ] || { echo "::error::读不到版本号 / 内核提交"; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "core=$core" >> "$GITHUB_OUTPUT"
+          echo "push=$PUSH" >> "$GITHUB_OUTPUT"
+          echo "Docker 版 ${version}，内核 meowx-core ${core}，推镜像仓库：${PUSH}"
+
+      - name: login ghcr.io
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: build
+        run: |
+          rm -rf dist
+          extra=()
+          [ "$PUSH" = true ] && extra=(--push)
+          scripts/build-docker.sh "${{ steps.version.outputs.version }}" --image "$IMAGE" --tar "${extra[@]}"
+          (cd dist && sha256sum *.tar)
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: meowx-docker-${{ steps.version.outputs.version }}
+          path: dist/meowx-docker-*.tar
+          if-no-files-found: error
+          retention-days: 14
+
+      # 自建 runner 的 docker 不会自己清：删掉这次装进本机的两个标签（多架构推送不进本机）
+      - name: cleanup
+        if: always()
+        run: docker image rm "$IMAGE:${{ steps.version.outputs.version }}" "$IMAGE:latest" >/dev/null 2>&1 || true
+
+  # Docker 版失败不挡飞牛版的 Release：等它结束，成功了就把离线镜像一起挂上
   release:
-    needs: build
-    if: github.ref_type == 'tag'
+    needs: [build, docker]
+    if: ${{ !cancelled() && github.ref_type == 'tag' && needs.build.result == 'success' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -94,13 +175,23 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - uses: actions/download-artifact@v8
+        if: needs.docker.result == 'success'
+        with:
+          pattern: meowx-docker-*
+          path: dist
+          merge-multiple: true
+
       - name: checksums
-        run: cd dist && sha256sum *.fpk | tee SHA256SUMS
+        run: |
+          shopt -s nullglob
+          cd dist && sha256sum ./*.fpk ./*.tar | sed 's| \./| |' | tee SHA256SUMS
 
       - uses: softprops/action-gh-release@v3
         with:
           files: |
             dist/*.fpk
+            dist/*.tar
             dist/SHA256SUMS
           prerelease: ${{ contains(github.ref_name, '-') }}
 
@@ -132,3 +223,31 @@ jobs:
         run: |
           python3 scripts/publish_cdn.py --version "${{ needs.build.outputs.version }}" \
             --core "${{ needs.build.outputs.core }}" dist/*.fpk
+
+  # Docker 版推 CDN：离线镜像传到 R2 的 meowx/docker/，再把 docker 条目（含镜像名）登记进 meowx/latest.json
+  # （控制服务的「检查更新」读它）。镜像已经在 docker 作业里推上 ghcr.io 了。
+  publish-docker:
+    needs: docker
+    if: needs.docker.outputs.pushed == 'true'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: publish-cdn
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: meowx-docker-*
+          path: dist
+          merge-multiple: true
+
+      - name: publish
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+        run: |
+          python3 scripts/publish_cdn.py --platform docker --image ghcr.io/mmwx-group/meowx-docker \
+            --version "${{ needs.docker.outputs.version }}" --core "${{ needs.docker.outputs.core }}" dist/*.tar

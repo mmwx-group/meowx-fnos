@@ -58,6 +58,31 @@ class PublishCDNTest(unittest.TestCase):
             p.merge_manifest(manifest, {'version': '0.1.9'}, 'now')
         self.assertEqual(p.merge_manifest(manifest, {'version': '0.2.0'}, 'now')['platforms']['fnos']['version'], '0.2.0')
 
+    def test_docker_file_entry(self):
+        f = p.file_entry(self.fpk('meowx-docker-0.1.9-arm64.tar', b'abc'), '0.1.9', 'docker')
+        self.assertEqual((f['kind'], f['arch'], f['size']), ('image-tar', 'arm64', 3))
+        self.assertEqual(f['url'], 'https://dl.miaomiaowux.com/meowx/docker/meowx-docker-0.1.9-arm64.tar')
+        self.assertEqual(p.file_entry(self.fpk('meowx-docker-0.1.9-amd64.tar'), '0.1.9', 'docker')['arch'], 'x86_64')
+        with self.assertRaises(SystemExit):  # 飞牛的文件名不认
+            p.file_entry(self.fpk('meowx-fnos-0.1.9-x86.fpk'), '0.1.9', 'docker')
+        with self.assertRaises(SystemExit):  # 反过来也不认
+            p.file_entry(self.fpk('meowx-docker-0.1.9-amd64.tar'), '0.1.9')
+
+    def test_docker_entry_has_image_and_order(self):
+        files = [p.file_entry(self.fpk(f'meowx-docker-0.1.9-{a}.tar'), '0.1.9', 'docker') for a in ('arm64', 'amd64')]
+        e = p.platform_entry('docker', '0.1.9', 'abc1234', files, 'T', 'ghcr.io/mmwx-group/meowx-docker')
+        self.assertEqual(e['image'], 'ghcr.io/mmwx-group/meowx-docker:0.1.9')
+        self.assertEqual([f['arch'] for f in e['files']], ['x86_64', 'arm64'])
+        self.assertNotIn('image', p.fnos_entry('0.1.9', 'abc1234', [], 'T'))
+
+    def test_merge_docker_leaves_fnos_alone(self):
+        manifest = {'platforms': {'fnos': {'version': '0.2.0'}, 'docker': {'version': '0.1.8'}}}
+        out = p.merge_manifest(manifest, {'version': '0.1.9'}, 'now', 'docker')
+        self.assertEqual(out['platforms']['fnos'], {'version': '0.2.0'})
+        self.assertEqual(out['platforms']['docker'], {'version': '0.1.9'})
+        with self.assertRaises(SystemExit):
+            p.merge_manifest(manifest, {'version': '0.1.7'}, 'now', 'docker')
+
 
 if __name__ == '__main__':
     unittest.main()
