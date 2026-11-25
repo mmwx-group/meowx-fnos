@@ -1,5 +1,6 @@
 // 节点：代理组（经内核 API），手动选择组可点选成员；单个节点与整组测延迟（测速地址见 ../testurl.js）；
-// 主控指定了入口的节点带一个分叉小标（见 ../entries.js）
+// 主控指定了入口的节点带一个分叉小标（见 ../entries.js）；喵窝白名单直连的节点（生成运行配置时写了 interface-name: tailscale0，
+// 见 runcfg/meshnodes.go）带「喵窝」小标
 import { html, useState, useEffect } from '../lib.js';
 import { get, put, seg } from '../api.js';
 import { useStore, toast, saveSettings } from '../store.js';
@@ -9,6 +10,9 @@ import { TEST_URL_PRESETS, effectiveTestUrl, testUrlChoice, checkTestUrl, lastDe
 import { entryIndex, entryLines, entryTip } from '../entries.js';
 
 const TIMEOUT = 5000;
+
+// 经喵窝连接的节点：内核节点对象里出站网卡是喵窝的 tailscale0
+const MESH_IFACE = 'tailscale0';
 
 const typeNames = {
     Selector: '手动选择', URLTest: '自动选择', Fallback: '故障转移', LoadBalance: '负载均衡', Relay: '链式代理',
@@ -144,6 +148,7 @@ function Group({ group, proxies, testSetting, open, onToggle, onReload, override
                 onClick=${() => pick(name)} onKeyDown=${(e) => (e.key == 'Enter' || e.key == ' ') && (e.preventDefault(), pick(name))}>
                 <div class="node__head">
                     <div class="node__name" title=${name}>${name}</div>
+                    ${p?.interface == MESH_IFACE && html`<span class="badge mesh-badge" title="经喵窝连接，不占服务器的 IP 白名单名额">喵窝</span>`}
                     ${entry && html`<button type="button" class=${'entry-mark' + (tipOpen ? ' is-open' : '')} title=${tip}
                         aria-label="主控指定入口" aria-expanded=${tipOpen} onKeyDown=${(e) => e.stopPropagation()}
                         onClick=${(e) => { e.stopPropagation(); setTipNode(tipOpen ? '' : name); }}><${EntryIcon} /></button>`}

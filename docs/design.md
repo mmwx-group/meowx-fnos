@@ -81,6 +81,14 @@ fpk
 - `meowx-core panel mesh …` 目前只在 meowx-openwrt 的补丁 003 里，NAS 版编内核时同样打上（以后并进 meowx-core）。
 - tailscaled 在容器里用内核网卡（`tailscale0`），状态目录 `/data/tailscale`；局域网转发、映射段的 DNAT、masquerade 同 OpenWrt 版。
 - 网关如果是已在喵窝开放同一网段的 OpenWrt 路由器：NAS 再申报同一段会被主控判冲突、改成映射段——测试时先只开放 NAS 本机。
+- **白名单直连**（规格 miaomiaowuC/Design/meshnet-whitelist-direct.md §B）：喵窝开着、入网成功、「白名单节点经喵窝连线」没关时，
+  拉登录主控（含订阅域名、从主控账户导入的）的订阅带 `X-MeowX-Mesh: on`，否则 `off`；别家机场的订阅不带（`store.MeshHeaderValue`）。
+  主控下发的喵窝版节点（`_mmwx-mesh: true`，server = 白名单服务器的 100.64.x.y）在生成运行配置时处理（`runcfg/meshnodes.go`）：
+  生效时保留、写 `interface-name: tailscale0`，不生效时拿掉并从各组摘掉（空组补 DIRECT）、rules / sub-rules 里指向它们的规则
+  整行删掉（含逻辑规则），都去掉私有字段。不加 dialer-proxy
+  （内核编译时去掉了 tailscale 出站，走内核网卡就够）；写 interface-name 是因为透明代理开着时 TUN 的 auto-detect-interface 会把内核的
+  出站连接一律绑到默认网卡，100.64.x.y 也会被绑出去。飞牛版与 Docker 版一样是内核网卡（Docker 版要宿主网络 + `/dev/net/tun`，
+  没有就起不了 tailscaled、喵窝开不了，也就不会生效）。打洞失败时经中继，速度受中继限制。
 
 ## 7. 网页界面
 

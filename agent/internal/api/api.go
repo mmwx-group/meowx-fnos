@@ -79,6 +79,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/mesh", s.meshView)
 	mux.HandleFunc("PUT /api/mesh", s.meshSave)
 	mux.HandleFunc("POST /api/mesh/leave", s.meshLeave)
+	mux.HandleFunc("GET /api/mesh/panel", s.meshPanel)
+	mux.HandleFunc("PUT /api/mesh/whitelist", s.meshWhitelist)
 
 	mux.Handle("/api/core/", s.coreProxy())
 	mux.Handle("/", http.FileServerFS(s.Web))
@@ -744,7 +746,10 @@ func (s *Server) meshSave(w http.ResponseWriter, r *http.Request) {
 	if !readJSON(w, r, &next) {
 		return
 	}
+	before := s.App.Mesh.DirectOn()
 	if _, err := s.App.Settings.Update(func(cur *store.Settings) error {
+		// 「白名单节点经喵窝连线」由 PUT /api/mesh/whitelist 单独改，表单里没有它
+		next.WhitelistOff = cur.Mesh.WhitelistOff
 		cur.Mesh = next
 		return nil
 	}); err != nil {
@@ -753,18 +758,56 @@ func (s *Server) meshSave(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	if err := s.App.Mesh.Apply(ctx); err != nil {
+	err := s.App.Mesh.Apply(ctx)
+	// 白名单直连生效与否变了：重拉在用的本主控订阅 / 重新生成运行配置（入网失败时同样要摘掉喵窝版节点）
+	go s.App.MeshDirectChanged(context.Background(), before)
+	if err != nil {
 		writeJSON(w, map[string]any{"error": err.Error()})
 		return
 	}
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+// GET /api/mesh/panel：主控那边的喵窝信息（访问范围、设备上限、同网络的设备 / 站点、可经喵窝连接的服务器），
+// 加上「白名单节点经喵窝连线」的开关与生效情况。要向主控发请求：网页只在打开页面、应用完时取
+func (s *Server) meshPanel(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 60*time.Second)
+	defer cancel()
+	writeJSON(w, map[string]any{
+		"view":             s.App.Mesh.PanelView(ctx),
+		"whitelist_direct": !s.App.Settings.Get().Mesh.WhitelistOff,
+		"direct":           s.App.Mesh.DirectOn(),
+	})
+}
+
+// PUT /api/mesh/whitelist {"on": true|false}：「白名单节点经喵窝连线」开关（缺省开）。生效与否变了在后台重拉订阅 / 重新生成运行配置
+func (s *Server) meshWhitelist(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		On bool `json:"on"`
+	}
+	if !readJSON(w, r, &body) {
+		return
+	}
+	before := s.App.Mesh.DirectOn()
+	if _, err := s.App.Settings.Update(func(cur *store.Settings) error {
+		cur.Mesh.WhitelistOff = !body.On
+		return nil
+	}); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	go s.App.MeshDirectChanged(context.Background(), before)
+	writeJSON(w, map[string]any{"ok": true, "direct": s.App.Mesh.DirectOn()})
+}
+
 // POST /api/mesh/leave：从主控删掉这台设备、撤掉网段、关开关
 func (s *Server) meshLeave(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	writeJSON(w, map[string]any{"ok": true, "warning": s.App.Mesh.Leave(ctx)})
+	before := s.App.Mesh.DirectOn()
+	warning := s.App.Mesh.Leave(ctx)
+	go s.App.MeshDirectChanged(context.Background(), before)
+	writeJSON(w, map[string]any{"ok": true, "warning": warning})
 }
 
 // ---------- 内核的 REST API（节点、连接、日志，WebSocket 也转） ----------

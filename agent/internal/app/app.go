@@ -97,6 +97,10 @@ func New(version, dataDir, coreBinary, tsBinDir, uiPath string) (*App, error) {
 			}
 		},
 	}
+	// 拉登录的主控的订阅时告诉主控白名单直连生效没有（X-MeowX-Mesh，规格 meshnet-whitelist-direct.md §B2）
+	profiles.MeshHeader = func(p store.Profile) string {
+		return store.MeshHeaderValue(p, a.panelHosts(), a.Mesh.DirectOn())
+	}
 	// 新订阅换上去之前用设置混进去、让内核试读（同 OpenWrt 版：按真实设置混入出完整配置再测）
 	profiles.Validate = func(ctx context.Context, data []byte) error {
 		if !a.Settings.Get().TestProfile {
@@ -164,9 +168,45 @@ func (a *App) buildConfig(profile []byte) ([]byte, error) {
 		ExtraFakeIPFilter: a.Mesh.Hosts(),
 		RoutingMark:       hijack.CoreMark,
 		ProxyServers:      a.proxyServersInput(s),
+		MeshDirect:        a.Mesh.DirectOn(),
 		// 透明代理开着、不代理 IPv6：内核的 DNS 不回 AAAA，应用都走 IPv4（进 TUN / TPROXY）
 		NoAAAA: s.Proxy.Enabled && !s.Proxy.IPv6 && (s.Proxy.HostProxy || s.Proxy.LANProxy),
 	})
+}
+
+// panelHosts：登录的主控（panel.json 的 base / sub_base；没登录是零值）
+func (a *App) panelHosts() store.PanelHosts {
+	var h store.PanelHosts
+	if data, err := os.ReadFile(filepath.Join(a.Core.Paths.Panel, "panel.json")); err == nil {
+		_ = json.Unmarshal(data, &h)
+	}
+	return h
+}
+
+// MeshDirectChanged：开 / 关喵窝、退出喵窝、拨「白名单节点经喵窝连线」之后调，before = 改之前 DirectOn() 的值。
+// 生效与否变了：在用的是登录主控的订阅就重拉（带新的 X-MeowX-Mesh，主控据此给不给喵窝版节点），内核开着就按新状态重新生成
+// 运行配置（重拉失败也重新生成：关着时摘掉喵窝版节点）
+func (a *App) MeshDirectChanged(ctx context.Context, before bool) {
+	after := a.Mesh.DirectOn()
+	if after == before {
+		return
+	}
+	state := "不生效"
+	if after {
+		state = "生效"
+	}
+	a.Log.Add("mesh", "白名单节点经喵窝连线："+state)
+	s := a.Settings.Get()
+	if p, ok := a.Profiles.Get(s.Profile); ok && store.IsPanelSubscription(p, a.panelHosts()) {
+		if _, err := a.Profiles.Update(ctx, p.ID); err != nil {
+			a.Log.Add("agent", fmt.Sprintf("重拉订阅「%s」失败：%v", p.Name, err))
+		} else {
+			a.Log.Add("agent", fmt.Sprintf("重拉订阅「%s」", p.Name))
+		}
+	}
+	if s.Enabled {
+		_ = a.Apply(ctx)
+	}
 }
 
 // po0 实际上报的地址（开着 po0 加白时）：每台 po0 直连

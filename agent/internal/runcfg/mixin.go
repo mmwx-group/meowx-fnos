@@ -29,6 +29,8 @@ type Inputs struct {
 	NoAAAA            bool // DNS 不回 IPv6 地址
 	// 绕过节点服务器地址（nil = 不绕过）：节点的 IP 写进 TUN 的 route-exclude-address，fake-ip 黑名单模式下节点域名并进 fake-ip-filter
 	ProxyServers *ProxyServers
+	// 喵窝白名单直连生效（mesh.Manager.DirectOn）：留不留主控下发的喵窝版节点（meshnodes.go）
+	MeshDirect bool
 }
 
 // ProxyServers：绕过节点服务器地址要的东西（节点从最终的运行配置里收，proxy-provider 的缓存文件按 Home 找）
@@ -87,6 +89,9 @@ func Build(profile []byte, in Inputs) ([]byte, error) {
 		}
 		merge(cfg, ext)
 	}
+
+	// 喵窝版节点：生效时走 tailscale0，不生效时摘掉（额外混入之后做：那里加的组引用了它们也一并摘）
+	applyMeshNodes(cfg, in.MeshDirect, MeshInterface)
 
 	// 控制服务自己要的，最后写、谁也盖不掉
 	cfg["external-controller"] = in.APIListen

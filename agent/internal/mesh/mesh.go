@@ -452,6 +452,46 @@ func (m *Manager) Shutdown() {
 	firewallRemove()
 }
 
+// ---------- 白名单直连（规格 miaomiaowuC/Design/meshnet-whitelist-direct.md §B） ----------
+
+// DirectOn：白名单直连这一刻生效没有——喵窝开着、「白名单节点经喵窝连线」没关、登录着主控、上一次入网成功（有控制地址、没有错误；
+// 入网成功就说明账号在喵窝名单里，主控不在名单时 up 会失败）。拉订阅的 X-MeowX-Mesh 与运行配置里留不留喵窝版节点都看它
+func (m *Manager) DirectOn() bool {
+	s := m.Settings.Get().Mesh
+	if !s.Enabled || s.WhitelistOff {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(m.Core.Paths.Panel, "panel.json")); err != nil {
+		return false
+	}
+	st := m.LoadState()
+	return st.ControlURL != "" && st.Error == ""
+}
+
+// PanelView：喵窝页要的主控信息（meowx-core panel mesh view：整理过的 status——access_scope / in_list / device_limit / servers，
+// 在名单里时还有 devices 的 shared_devices）。老内核没有 view 子命令时退回只取 status。要向主控发请求，网页只在打开页面、应用完时取
+func (m *Manager) PanelView(ctx context.Context) map[string]any {
+	if _, err := os.Stat(filepath.Join(m.Core.Paths.Panel, "panel.json")); err != nil {
+		return map[string]any{"success": false, "error": "还没有登录主控账户"}
+	}
+	out, err := m.Core.Panel(ctx, "mesh", "view")
+	if err != nil && strings.Contains(err.Error(), "unknown mesh command") {
+		st, err2 := m.panel(ctx, "status")
+		if err2 != nil {
+			return map[string]any{"success": false, "error": err2.Error()}
+		}
+		return map[string]any{"success": true, "status": st}
+	}
+	if err != nil {
+		return map[string]any{"success": false, "error": err.Error()}
+	}
+	var v map[string]any
+	if json.Unmarshal(out, &v) != nil {
+		return map[string]any{"success": false, "error": "应答无法解析"}
+	}
+	return v
+}
+
 // ---------- 状态（网页用） ----------
 
 type PeerView struct {

@@ -67,6 +67,8 @@ type ProfileStore struct {
 	Client *http.Client
 	// 新内容换上去之前的检查（内核试读），nil = 只做基本检查
 	Validate func(ctx context.Context, yamlData []byte) error
+	// 拉这份订阅时 X-MeowX-Mesh 头的值（"on" / "off"；空 = 不带，别家机场的订阅），见 MeshHeaderValue。nil = 一律不带
+	MeshHeader func(p Profile) string
 }
 
 func OpenProfiles(dir string) (*ProfileStore, error) {
@@ -230,7 +232,7 @@ func (s *ProfileStore) userAgent(p Profile) string {
 
 var userinfoRe = regexp.MustCompile(`(?i)(upload|download|total|expire)=(\d+)`)
 
-func (s *ProfileStore) fetch(ctx context.Context, url, ua string) ([]byte, http.Header, error) {
+func (s *ProfileStore) fetch(ctx context.Context, url, ua, mesh string) ([]byte, http.Header, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, nil, err
@@ -238,6 +240,9 @@ func (s *ProfileStore) fetch(ctx context.Context, url, ua string) ([]byte, http.
 	req.Header.Set("User-Agent", ua)
 	if push, _ := ctx.Value(pushRefreshKey{}).(bool); push {
 		req.Header.Set("mmwx-refresh", "push")
+	}
+	if mesh != "" {
+		req.Header.Set("X-MeowX-Mesh", mesh)
 	}
 	resp, err := s.Client.Do(req)
 	if err != nil {
@@ -257,14 +262,19 @@ const fallbackUserAgent = "clash.meta"
 
 func (s *ProfileStore) download(ctx context.Context, p *Profile) error {
 	ua := s.userAgent(*p)
-	body, header, err := s.fetch(ctx, p.URL, ua)
+	// 登录的主控（含它的订阅域名）的订阅：告诉主控白名单直连生效没有，on 时主控给喵窝版节点（规格 meshnet-whitelist-direct.md §B2）
+	mesh := ""
+	if s.MeshHeader != nil {
+		mesh = s.MeshHeader(*p)
+	}
+	body, header, err := s.fetch(ctx, p.URL, ua, mesh)
 	if err != nil {
 		return fmt.Errorf("下载失败：%w", err)
 	}
 	// 用的是缺省（官方）UA、拿到的又不是 Clash 配置：换 clash.meta 再拉一次，拿到 Clash 配置就用它。
 	// 主控订阅认得官方 UA，第一次就是 Clash 配置，不受影响；用户自己填了 UA 的照填的来，不替他换
 	if clashShape(body) != nil && (p.UserAgent == "" || p.UserAgent == "meowx") {
-		if b2, h2, err2 := s.fetch(ctx, p.URL, fallbackUserAgent); err2 == nil && clashShape(b2) == nil {
+		if b2, h2, err2 := s.fetch(ctx, p.URL, fallbackUserAgent, mesh); err2 == nil && clashShape(b2) == nil {
 			body, header = b2, h2
 		}
 	}
@@ -273,7 +283,7 @@ func (s *ProfileStore) download(ctx context.Context, p *Profile) error {
 	}
 	info := header.Get("Subscription-Userinfo")
 	if p.InfoURL != "" {
-		if _, h, err := s.fetch(ctx, p.InfoURL, ua); err == nil && h.Get("Subscription-Userinfo") != "" {
+		if _, h, err := s.fetch(ctx, p.InfoURL, ua, ""); err == nil && h.Get("Subscription-Userinfo") != "" {
 			info = h.Get("Subscription-Userinfo")
 		}
 	}

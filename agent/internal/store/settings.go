@@ -136,6 +136,9 @@ type Mesh struct {
 	HostAccess bool     `json:"host_access"` // 喵窝里的设备能不能访问 NAS 本身
 	Networks   []string `json:"networks"`    // 要开放的局域网网段
 	Hostname   string   `json:"hostname"`
+	// 「白名单节点经喵窝连线」关掉了（规格 miaomiaowuC/Design/meshnet-whitelist-direct.md §B1）。缺省开，所以存的是「关」：
+	// 老的 settings.json、网页喵窝表单整份 PUT 时没有这个键都算开着。由 PUT /api/mesh/whitelist 单独改，保存喵窝表单时保留原值
+	WhitelistOff bool `json:"whitelist_direct_off,omitempty"`
 }
 
 // Web：管理界面

@@ -99,6 +99,8 @@ Profile：`{id, name, url?, info_url?, user_agent?, from_panel?, updated_at(秒)
 | GET | `/api/mesh` | `{mesh: View, lan: ["10.10.1.0/24", …]}`；`lan` 是可开放的局域网网段候选 |
 | PUT | `/api/mesh` | 喵窝设置 `{enabled, force_map, host_access, networks, hostname}`：存好按设置入网 / 退出（最多一两分钟）。回 `{ok}` 或 `{error}` |
 | POST | `/api/mesh/leave` | 退出喵窝：主控里删这台设备、撤掉申报的网段、关开关。回 `{ok, warning?}` |
+| GET | `/api/mesh/panel` | 主控那边的喵窝信息：`{view, whitelist_direct, direct}`。`view` = `meowx-core panel mesh view`：`{success, status, devices?, devices_error?}`（status 带 `access_scope` / `in_list` / `device_limit`（0 = 不限）/ 预留的 `servers`；devices 的 `shared_devices` 里站点路由器标 `kind: "site"`、只有 `routes`）。要向主控发请求，网页只在打开页面、应用完时取 |
+| PUT | `/api/mesh/whitelist` | 「白名单节点经喵窝连线」`{on}`（缺省开，存成设置里的 `whitelist_direct_off`）。生效与否变了在后台重拉在用的本主控订阅、重新生成运行配置。回 `{ok, direct}` |
 
 View：`{settings, hostname, state: {router_id, control_url, magic_dns, sites: [{original, advertised, mapped}], advertised, hosts, error, applied_at},
 panel_logged_in, daemon, backend("Running"/"NeedsLogin"…), self: Peer, peers: [Peer], control_url, advertised}`；

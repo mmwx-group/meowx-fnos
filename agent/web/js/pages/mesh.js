@@ -1,5 +1,7 @@
 // 喵窝：NAS 用官方 tailscale 加入主控的喵窝（同 OpenWrt 版「喵窝」页），把局域网开放给同一管理员账号的其它设备。
-// 开关 /「保存并应用」把设置交给控制服务入网（最多一两分钟，按钮转圈等它）；页面开着时每 5 秒取一次状态
+// 开关 /「保存并应用」把设置交给控制服务入网（最多一两分钟，按钮转圈等它）；页面开着时每 5 秒取一次状态。
+// 主控那边的信息（访问范围、设备上限、同网络的设备 / 站点、可经喵窝连接的服务器）与「白名单节点经喵窝连线」开关在 MeshPanel：
+// 要向主控发请求，只在打开页面、应用完时取一次，不进 5 秒一次的轮询
 import { html, useState, useEffect, useRef } from '../lib.js';
 import { get, put, post } from '../api.js';
 import { useStore, toast, refreshPanel } from '../store.js';
@@ -25,6 +27,80 @@ function stateLabel(v, applying) {
     return ['未连接', v.state?.error ? 'is-error' : ''];
 }
 
+// 访问范围（主控 status 的 access_scope；旧主控没有 = 不显示）
+const scopeLabels = { servers: '访问范围：仅服务器', sites: '访问范围：服务器 + 管理员站点', full: '访问范围：完全互通' };
+
+function MeshPanel({ info, onReload }) {
+    const [busy, setBusy] = useState(false);
+    if (!info) {
+        return html`<${Card} title="主控" i=${2}><p class="muted">正在向主控读取喵窝信息…</p><//>`;
+    }
+    const view = info.view ?? {};
+    if (view.success === false) {
+        return html`<${Card} title="主控" i=${2}><p class="hint">没能从主控读到喵窝信息：${stripPeriod(view.error || '未知原因')}</p>
+            <${Button} small onClick=${onReload}>重试<//><//>`;
+    }
+    const st = view.status ?? {};
+    // 老内核的 status 没整理过、没有 in_list：照同一个规则现算（available，或原因不是 not_admin）
+    const inList = st.in_list ?? (!!st.available || (!!st.reason && st.reason != 'not_admin'));
+    if (!inList) {
+        return st.reason == 'not_admin'
+            ? html`<${Card} title="主控" i=${2}><p class="hint">这个账号不在主控的喵窝名单里。</p><//>`
+            : null;
+    }
+    const meta = [scopeLabels[st.access_scope], st.joined_admin && `已加入 ${st.joined_admin} 的喵窝`,
+        st.device_limit > 0 ? `设备上限：${st.device_limit} 台` : '设备上限：不限'].filter(Boolean);
+    const servers = st.servers ?? [];
+    const shared = view.devices?.shared_devices ?? [];
+    const toggle = async (on) => {
+        setBusy(true);
+        try {
+            await put('/mesh/whitelist', { on });
+            toast(on ? '已打开白名单节点经喵窝连线' : '已关闭白名单节点经喵窝连线');
+        } catch (err) {
+            toast(`没改成功：${stripPeriod(err.message)}`, 'warn');
+        } finally {
+            setBusy(false);
+            onReload();
+        }
+    };
+    return html`<${Card} title="主控" i=${2} desc=${meta.join(' · ')}>
+        <${Field} label="白名单节点经喵窝连线" desc="订阅里的白名单服务器节点改经喵窝连接，不占服务器的 IP 白名单名额。需要开着喵窝。">
+            <${Switch} label="白名单节点经喵窝连线" checked=${info.whitelist_direct !== false} disabled=${busy} onChange=${toggle} />
+        <//>
+        ${info.direct
+            ? html`<p class="hint">生效中：拉本主控的订阅时会告诉主控，主控为白名单服务器下发经喵窝连接的节点（节点页带「喵窝」小标）。</p>`
+            : info.whitelist_direct !== false && html`<p class="hint">打开喵窝并入网成功后生效。</p>`}
+        ${servers.length > 0 && html`
+            <div class="section-title">可经喵窝连接的服务器（${servers.length}）</div>
+            <div class="list">${servers.map((x) => html`<div class="item">
+                <div class="item__main">
+                    <div class="item__name">${x.name}</div>
+                    <div class="item__meta mono">${x.mesh_ip}</div>
+                </div>
+            </div>`)}</div>`}
+        ${shared.length > 0 && html`
+            <div class="section-title">同网络的设备（${shared.length}）</div>
+            <div class="list">${shared.map((d) => d.kind == 'site'
+                ? html`<div class="item">
+                    <div class="item__main">
+                        <div class="item__name">站点 · ${d.username || d.name || '?'}</div>
+                        <div class="item__meta mono">${(d.routes ?? []).join(', ')}</div>
+                    </div>
+                    <span class="badge">站点</span>
+                </div>`
+                : html`<div class="item">
+                    <span class=${'peer-dot' + (d.online ? ' is-online' : '')}></span>
+                    <div class="item__main">
+                        <div class="item__name">${d.name || d.dns_name}</div>
+                        <div class="item__meta">${[d.ipv4, (d.routes ?? []).join(', '), d.username].filter(Boolean).join(' · ')}</div>
+                    </div>
+                </div>`)}</div>`}
+        ${view.devices_error && html`<p class="hint">没能读到设备列表：${stripPeriod(view.devices_error)}</p>`}
+        ${!view.devices_error && view.devices?.error && html`<p class="hint">${stripPeriod(view.devices.error)}</p>`}
+    <//>`;
+}
+
 const formOf = (s) => ({
     networks: s?.networks ?? [],
     force_map: !!s?.force_map,
@@ -40,6 +116,7 @@ export function Mesh({ active, go }) {
     const [extra, setExtra] = useState('');       // 候选以外的网段（手填，逗号分隔）
     const [applying, setApplying] = useState(false);
     const [leaving, setLeaving] = useState(false);
+    const [panelInfo, setPanelInfo] = useState(null);   // GET /mesh/panel；null = 还在取
     // 表单是否被改过：没改过才跟着取回的状态刷新（填了一半的网段不丢）
     const touched = useRef(false);
 
@@ -57,6 +134,20 @@ export function Mesh({ active, go }) {
             setError(err.message);
         }
     };
+
+    const loadPanel = async () => {
+        try {
+            setPanelInfo(await get('/mesh/panel'));
+        } catch (err) {
+            setPanelInfo({ view: { success: false, error: err.message } });
+        }
+    };
+    // 主控那边的信息：打开页面时取一次（不进轮询）
+    useEffect(() => {
+        if (active && (data?.mesh?.panel_logged_in ?? panel?.logged_in)) {
+            loadPanel();
+        }
+    }, [active, data?.mesh?.panel_logged_in ?? panel?.logged_in]);
 
     useEffect(() => {
         if (!active) {
@@ -118,6 +209,7 @@ export function Mesh({ active, go }) {
             touched.current = false;   // 应用完按新状态重新填表
             setApplying(false);
             await load();
+            loadPanel();
         }
     };
     const leave = async () => {
@@ -128,6 +220,7 @@ export function Mesh({ active, go }) {
             setLeaving(false);
             touched.current = false;
             await load();
+            loadPanel();
         }
     };
 
@@ -184,6 +277,8 @@ export function Mesh({ active, go }) {
             </div>
             ${applying && html`<p class="hint">入网或重新申报网段最多要一两分钟，请稍等。</p>`}
         <//>`}
+
+        ${loggedIn && html`<${MeshPanel} info=${panelInfo} onReload=${loadPanel} />`}
 
         ${loggedIn && s.enabled && v.backend == 'Running' && html`<${Card} title=${`其它设备（${peers.length}）`} i=${2}>
             ${peers.length == 0
